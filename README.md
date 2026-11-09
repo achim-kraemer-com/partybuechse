@@ -143,6 +143,18 @@ jede vorgehaltene Datei existiert.
 
 **Eine Party zur Zeit.** Ein Spotify-Konto hat genau einen Player, also steuert ihn genau eine Party: die zuletzt gestartete. Eine neue Party beendet deshalb die laufende, und eine alte lässt sich nicht wieder öffnen, solange eine andere läuft. Andere aktive Partys desselben Hosts gehen auf `standby` und fassen Spotify nicht an – liefen zwei gleichzeitig, verbuchten beide den laufenden Titel als ihren eigenen und legten beide Wünsche in dieselbe Warteschlange.
 
+**Reste in Spotifys Warteschlange.** Die Warteschlange gehört dem Spotify-Konto, nicht der
+Party, und die Web-API kann einen Titel nicht wieder herausnehmen. Ein Wunsch, der kurz vor
+dem Ende seiner Party übergeben wurde, läuft deshalb mitten in der nächsten an. Die
+Partybüchse erkennt das – sie weiß, welchen Titel sie für welche Party übergeben hat – und
+überspringt ihn, sobald er anfängt: einen pro Abgleich und nur genau den, der gerade läuft.
+Die eigene Musik des Hosts bleibt unangetastet.
+
+**Partys löschen.** In der Host-Ansicht einer Party, unten bei den Aktionen. Weg sind dann
+Wunschliste, Stimmen und Gäste. Lag beim Löschen noch ein Wunsch in Spotifys Warteschlange,
+sagt die Partybüchse das: danach weiß sie nicht mehr, dass der Titel von dort stammt, und
+überspringt ihn in der nächsten Party auch nicht mehr.
+
 Ohne Hintergrundprozess: Jede offene Seite (Gast, Display, Host) stößt alle paar Sekunden den Abgleich mit Spotify an. Läuft keine Seite, kann optional `php bin/console app:party:sync --watch` übernehmen.
 
 ## 6. Wie der Abgleich funktioniert

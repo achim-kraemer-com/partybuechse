@@ -134,6 +134,10 @@ class PlaybackSync
         $current = $state->track;
 
         try {
+            if (null !== $skipped = $this->skipLeftoverOfAnotherParty($party, $state, $now)) {
+                return $skipped;
+            }
+
             $actions = array_merge($actions, $this->settleQueuedWishes($party, $state, $now));
 
             $nowPlaying = $state->toArray();
@@ -160,6 +164,62 @@ class PlaybackSync
         }
 
         return new SyncResult(Party::SYNC_OK, $message, $actions);
+    }
+
+    /**
+     * Lets go of a track that this host handed to Spotify for a different party.
+     *
+     * Spotifys Warteschlange gehört dem Konto, nicht der Party, und die API kann einen Titel
+     * nicht wieder herausnehmen. Ein Wunsch, der kurz vor dem Ende seiner Party übergeben
+     * wurde, läuft deshalb mitten in der nächsten – die Gäste hören ein Lied, das sich hier
+     * niemand gewünscht hat. Verhindern können wir das nicht, aber wir können ihn ziehen
+     * lassen, sobald er anfängt.
+     *
+     * Übersprungen wird höchstens einer pro Durchgang, und nur genau der Titel, der gerade
+     * läuft: so entscheidet jedes Mal die Wirklichkeit und nie eine Zählung, die danebenliegen
+     * könnte. Drei Überreste sind nach drei Durchgängen weg.
+     */
+    private function skipLeftoverOfAnotherParty(Party $party, PlaybackState $state, \DateTimeImmutable $now): ?SyncResult
+    {
+        $current = $state->track;
+        if (null === $current || !$state->isPlaying) {
+            return null;
+        }
+
+        // Steht der Titel auch auf dieser Liste, gehört er hierher und bleibt.
+        if (null !== $this->suggestions->findPendingByUri($party, $current->uri)) {
+            return null;
+        }
+
+        $leftover = $this->suggestions->findQueuedInAnotherParty($party, $current->uri);
+        if (null === $leftover) {
+            return null;
+        }
+
+        // Erst vermerken, dann überspringen. Andersherum würde ein verlorener Schreibvorgang
+        // beim nächsten Poll erneut überspringen – und dann träfe es den Titel danach, also
+        // womöglich die Musik des Hosts.
+        $leftover->markRemoved();
+        $this->entityManager->flush();
+
+        $this->spotify->skipToNext($party->getHost(), $state->deviceId);
+
+        $message = sprintf(
+            'Übersprungen: „%s“ lag noch aus der Party „%s“ in Spotifys Warteschlange.',
+            $current->title,
+            $leftover->getParty()->getName(),
+        );
+        $party->setNowPlaying(null);
+        $party->setSync(Party::SYNC_OK, $message, $now);
+        $this->entityManager->flush();
+
+        $this->logger->info('Skipped a leftover from another party', [
+            'party' => $party->getCode(),
+            'from' => $leftover->getParty()->getCode(),
+            'wish' => $leftover->getSpotifyUri(),
+        ]);
+
+        return new SyncResult(Party::SYNC_OK, $message, [$message]);
     }
 
     /**
@@ -321,10 +381,26 @@ class PlaybackSync
 
         try {
             $call();
-        } catch (\Throwable $e) {
+        } catch (SpotifyApiException $e) {
+            // Spotify hat geantwortet und abgelehnt: der Titel liegt nicht in der
+            // Warteschlange, der Wunsch gehört zurück in die Rangliste.
             $wish->reopen();
             $this->entityManager->flush();
-            $this->logger->warning('Hand-over to Spotify failed, wish is back in the ranking', [
+            $this->logger->warning('Spotify refused the hand-over, wish is back in the ranking', [
+                'party' => $party->getCode(),
+                'wish' => $wish->getSpotifyUri(),
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        } catch (\Throwable $e) {
+            // Gar keine Antwort (Zeitüberschreitung, Verbindungsabbruch): ob Spotify den Titel
+            // angenommen hat, wissen wir nicht. Der Wunsch bleibt deshalb auf "queued", damit
+            // settleQueuedWishes beim nächsten Durchgang in Spotifys Warteschlange nachsieht
+            // und die Tatsachen entscheiden. Setzten wir ihn hier zurück und Spotify hätte ihn
+            // doch, läge er unsichtbar in der Warteschlange und liefe irgendwann in einer
+            // anderen Party an.
+            $this->logger->warning('Hand-over to Spotify got no answer, wish stays queued', [
                 'party' => $party->getCode(),
                 'wish' => $wish->getSpotifyUri(),
                 'error' => $e->getMessage(),

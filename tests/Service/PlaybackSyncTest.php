@@ -114,6 +114,61 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertSame(Party::SYNC_OK, $this->sync->sync($newer)->status);
     }
 
+    /**
+     * Spotifys Warteschlange gehört dem Konto, nicht der Party. Ein Wunsch, der kurz vor dem
+     * Ende seiner Party übergeben wurde, läuft deshalb mitten in der nächsten an – genau das
+     * ist passiert: in Party F65DP lief „Dirty Diana“ aus der längst beendeten D99VH.
+     */
+    public function testATrackLeftInSpotifysQueueByAnotherPartyIsSkipped(): void
+    {
+        $leftover = $this->leftoverOfAnEndedParty();
+        $this->spotify->state = $this->playing($leftover->toTrackInfo(), progressMs: 3_000, isPlaying: true);
+
+        $result = $this->sync->sync($this->party);
+
+        self::assertContains(['next'], $this->spotify->calls);
+        self::assertSame(SuggestionStatus::Removed, $leftover->getStatus());
+        self::assertStringContainsString('Übersprungen', (string) $result->message);
+        self::assertStringContainsString('Alte Party', (string) $result->message);
+
+        // Nur einmal: beim nächsten Durchgang ist der Titel abgehakt.
+        $this->spotify->calls = [];
+        $this->sync->sync($this->party);
+        self::assertNotContains(['next'], $this->spotify->calls);
+    }
+
+    public function testATrackThisPartyWishesItselfIsNeverSkipped(): void
+    {
+        $leftover = $this->leftoverOfAnEndedParty();
+
+        // Dieselbe Nummer steht auch auf dieser Liste.
+        $mine = $this->voting->suggest(
+            Fixtures::guest($this->em, $this->party, $this->clock->now(), str_repeat('c', 48), 'Clara'),
+            $leftover->toTrackInfo(),
+        );
+        $this->spotify->state = $this->playing($leftover->toTrackInfo(), progressMs: 3_000, isPlaying: true);
+
+        $this->sync->sync($this->party);
+
+        self::assertNotContains(['next'], $this->spotify->calls);
+        self::assertSame(SuggestionStatus::Queued, $leftover->getStatus());
+        self::assertSame(SuggestionStatus::Played, $mine->getStatus(), 'Für diese Party zählt er als gelaufen.');
+    }
+
+    /** Ein Wunsch, den eine ältere, beendete Party desselben Hosts an Spotify übergeben hat. */
+    private function leftoverOfAnEndedParty(): Suggestion
+    {
+        $earlier = $this->clock->now()->modify('-1 hour');
+        $old = Fixtures::party($this->em, $this->party->getHost(), $earlier, code: 'OLD99', name: 'Alte Party');
+        $guest = Fixtures::guest($this->em, $old, $earlier, str_repeat('o', 48), 'Olli');
+        $leftover = $this->voting->suggest($guest, Fixtures::track('x', 'Fremdes Lied'));
+        $leftover->markQueued($earlier);
+        $old->end($earlier);
+        $this->em->flush();
+
+        return $leftover;
+    }
+
     public function testNothingHappensWhileTheCurrentTrackHasPlentyOfTimeLeft(): void
     {
         $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 10_000, isPlaying: true);

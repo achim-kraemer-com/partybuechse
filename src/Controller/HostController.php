@@ -10,6 +10,7 @@ use App\Repository\PartyRepository;
 use App\Repository\SuggestionRepository;
 use App\Service\HostSession;
 use App\Service\PartyCodeGenerator;
+use App\Service\PartyDeleter;
 use App\Service\PartyStateBuilder;
 use App\Service\PlaybackSync;
 use App\Service\PublicUrlResolver;
@@ -241,6 +242,38 @@ class HostController extends AbstractController
         }
 
         return $this->redirectToRoute('host_party', ['code' => $party->getCode()]);
+    }
+
+    #[Route('/party/{code}/delete', name: 'host_party_delete', methods: ['POST'])]
+    public function delete(string $code, Request $request, PartyDeleter $deleter): Response
+    {
+        if (null === $host = $this->hostSession->getHost()) {
+            return $this->spotifyRequired();
+        }
+        $party = $this->ownParty($host, $code);
+
+        if (!$this->isCsrfTokenValid('host_party_delete', (string) $request->request->get('_token'))) {
+            $this->addFlash('error', 'Das Formular ist abgelaufen, bitte noch einmal absenden.');
+
+            return $this->redirectToRoute('host_party', ['code' => $party->getCode()]);
+        }
+
+        $name = $party->getName();
+        $withSpotify = $deleter->wishesStillWithSpotify($party);
+        $deleter->delete($party);
+
+        $this->addFlash('success', sprintf('Party „%s“ mit allen Wünschen, Stimmen und Gästen gelöscht.', $name));
+
+        // Nach dem Löschen weiss die Partybüchse nicht mehr, dass diese Titel von hier stammen,
+        // und kann sie in der naechsten Party nicht mehr wegräumen.
+        if ([] !== $withSpotify) {
+            $this->addFlash('info', sprintf(
+                '%s liegt noch in Spotifys Warteschlange und läuft dort irgendwann an. Leere die Warteschlange in Spotify, wenn du das nicht willst.',
+                implode(', ', array_map(static fn ($wish): string => sprintf('„%s“', $wish->getTitle()), $withSpotify)),
+            ));
+        }
+
+        return $this->redirectToRoute('host_dashboard');
     }
 
     #[Route('/party/{code}/sync', name: 'host_party_sync', methods: ['POST'])]

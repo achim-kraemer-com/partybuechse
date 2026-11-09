@@ -62,6 +62,32 @@ class SuggestionRepository extends ServiceEntityRepository
         return $this->findBy(['party' => $party, 'status' => SuggestionStatus::Queued], ['queuedAt' => 'ASC']);
     }
 
+    /**
+     * A wish this host handed to Spotify in a *different* party and that never played.
+     *
+     * Spotify's queue belongs to the account, not to the party, and the API has no way to take
+     * a track back out of it. A wish that was handed over shortly before its party ended
+     * therefore comes on during the next party: the guests hear a song nobody there wished for.
+     * "queued" is exactly the record of "handed over, not played yet".
+     */
+    public function findQueuedInAnotherParty(Party $party, string $uri): ?Suggestion
+    {
+        return $this->createQueryBuilder('s')
+            ->join('s.party', 'p')
+            ->andWhere('p.host = :host')
+            ->andWhere('p != :party')
+            ->andWhere('s.spotifyUri = :uri')
+            ->andWhere('s.status = :queued')
+            ->setParameter('host', $party->getHost())
+            ->setParameter('party', $party)
+            ->setParameter('uri', $uri)
+            ->setParameter('queued', SuggestionStatus::Queued->value)
+            ->orderBy('s.queuedAt', 'ASC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
     /** An open or queued wish for the same track, so duplicates turn into votes. */
     public function findPendingByUri(Party $party, string $uri): ?Suggestion
     {

@@ -128,6 +128,12 @@
                             <button class="btn btn-primary btn-sm" type="submit">Party wieder öffnen</button>
                         </form>
                     {% endif %}
+
+                    <form method="post" action="{{ path('host_party_delete', {code: party.code}) }}"
+                          onsubmit="return confirm('Party „{{ party.name|e('js') }}“ endgültig löschen? Wunschliste, Stimmen und Gäste verschwinden mit. Das lässt sich nicht rückgängig machen.');">
+                        <input type="hidden" name="_token" value="{{ csrf_token('host_party_delete') }}">
+                        <button class="btn btn-ghost btn-sm" type="submit">Party löschen</button>
+                    </form>
                 </div>
             </section>
         </div>

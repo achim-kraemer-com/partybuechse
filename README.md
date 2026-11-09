@@ -168,3 +168,85 @@ docker/, Dockerfile, compose.yaml   Container für Test und Hosting
 - Die Warteschlange ist Spotify-seitig: Hat der Host selbst Titel eingereiht, kommen die zuerst.
 - Episoden/Podcasts werden angezeigt, aber nicht als Wunsch angeboten.
 - Es gibt genau ein Host-Konto (aus der Umgebung). Mehrere Hosts bräuchten eine Benutzertabelle.
+
+## 11. Deployment
+
+Zwei Remotes, wie bei den Schwesterprojekten:
+
+| Remote   | Zweck |
+|----------|-------|
+| `origin` | GitHub – Versionsstand, deployt nichts |
+| `main`   | Server – ein Push löst die Auslieferung aus |
+
+```bash
+git push origin main    # nur versionieren
+git push main main      # ausliefern
+```
+
+Das Server-Remote ist
+`ssh://achim-kraemer.com@achim-kraemer.com:/var/www/vhosts/achim-kraemer.com/partybuechse.achim-kraemer.com.git`.
+Dessen `post-receive`-Hook checkt `main` nach
+`/var/www/vhosts/achim-kraemer.com/partybuechse.achim-kraemer.com` aus und ruft
+danach `deploy.sh` auf: Abhängigkeiten installieren, Datenbank anlegen und
+migrieren, Cache aufbauen. Der Hook liegt auf dem Server und ist **nicht
+versioniert**; Änderungen daran müssen dort direkt gemacht werden.
+
+`deploy.sh` legt die PHP-Version ausdrücklich auf `/opt/plesk/php/8.5/bin/php`
+fest. Ein Git-Hook läuft in einer nicht-interaktiven Shell, in der `php` die
+Systemversion 8.3 ist – das Web der Subdomain läuft aber unter 8.5. Liefen
+beide auseinander, baute 8.3 den Container nach `var/cache/prod` und 8.5 läse
+ihn wieder aus. Aus demselben Grund wird `composer` über die
+Plesk-`composer.phar` aufgerufen.
+
+Die Datenbank ist eine SQLite-Datei in `var/` und liegt damit außerhalb der
+Dokumentwurzel. Sie überlebt den Deploy, weil der Hook kein `git clean` läuft –
+`.env.local`, `var/` und `vendor/` sind nicht getrackt.
+
+### Einmalige Einrichtung auf dem Server
+
+1. **Document-Root in Plesk** auf `partybuechse.achim-kraemer.com/public`
+   setzen. Zeigt sie auf den Projektordner, ist der ganze Quellbaum samt
+   `.env.local` und der SQLite-Datenbank abrufbar: unter nginx/Plesk wird
+   `.htaccess` **vollständig ignoriert**, es gibt dort also keinen zweiten
+   Schutz. **Danach nachmessen, nicht annehmen** – eine Markierungsdatei in
+   den Projektordner legen und prüfen, dass sie von außen nicht kommt:
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' https://partybuechse.achim-kraemer.com/.env.dist
+   # 404 ist richtig. 200 bedeutet: Dokumentwurzel falsch, nicht deployen.
+   ```
+
+2. **Umgebung** einrichten. Die Grundwerte stehen in der versionierten
+   `.env.dist`; eigene Werte gehören in eine ungetrackte `.env.local`, die
+   jene überschreibt. Ein `cp` ist nicht nötig – Symfony lädt `.env.dist`
+   automatisch, wenn keine `.env` existiert.
+
+   ```bash
+   cd /var/www/vhosts/achim-kraemer.com/partybuechse.achim-kraemer.com
+
+   /opt/plesk/php/8.5/bin/php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'   # APP_SECRET
+
+   cat > .env.local <<'ENV'
+   APP_ENV=prod
+   APP_SECRET=<Ausgabe von oben>
+   HOST_USERNAME=achim
+   HOST_PASSWORD=<Passwort für /login>
+   SPOTIFY_CLIENT_ID=<Spotify Developer Dashboard>
+   SPOTIFY_CLIENT_SECRET=<Spotify Developer Dashboard>
+   SPOTIFY_REDIRECT_URI=https://partybuechse.achim-kraemer.com/spotify/callback
+   PUBLIC_BASE_URL=https://partybuechse.achim-kraemer.com
+   ENV
+   chmod 600 .env.local
+   ```
+
+   `deploy.sh` bricht ab, solange `.env.local` fehlt oder darin noch der
+   `APP_SECRET`-Platzhalter aus `.env.dist` steht – der Wert ist über das
+   öffentliche Repository bekannt und signiert CSRF-Token und das
+   Remember-Me-Cookie des Host-Logins.
+
+3. **Redirect-URI bei Spotify eintragen.** Im Developer Dashboard muss
+   `https://partybuechse.achim-kraemer.com/spotify/callback` als Redirect URI
+   stehen, zusätzlich zur lokalen. Fehlt sie, bricht die Anmeldung mit
+   `INVALID_CLIENT: Invalid redirect URI` ab.
+
+4. `git push main main` – jetzt läuft das Deployment durch.

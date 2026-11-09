@@ -109,6 +109,7 @@
             else if (sync.status === 'ended') text = 'Die Party ist beendet.';
             else if (sync.status === 'error') text = sync.message || 'Spotify meldet einen Fehler.';
             else if (sync.status === 'idle') text = 'Warte auf den ersten Abgleich mit Spotify …';
+            else if (sync.status === 'standby') text = sync.message || 'Eine andere Party steuert gerade die Musik.';
             container.appendChild(PB.h('div', { class: 'empty' }, text));
             return function () {};
         }
@@ -156,7 +157,7 @@
         if (!pill || !text) return;
         const sync = state.sync || {};
         pill.className = 'status-pill ' + (sync.status || 'idle');
-        const labels = { ok: 'Verbunden', no_device: 'Kein Spotify-Gerät', error: 'Spotify-Fehler', ended: 'Beendet', idle: 'Bereit' };
+        const labels = { ok: 'Verbunden', no_device: 'Kein Spotify-Gerät', error: 'Spotify-Fehler', ended: 'Beendet', idle: 'Bereit', standby: 'Andere Party steuert' };
         text.textContent = sync.message && sync.status !== 'ok' ? sync.message : (labels[sync.status] || sync.status || '');
         if (sync.status === 'ok' && sync.message) pill.title = sync.message;
     };

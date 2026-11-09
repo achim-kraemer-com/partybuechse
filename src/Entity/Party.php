@@ -25,6 +25,15 @@ class Party
     public const SYNC_ERROR = 'error';
     public const SYNC_ENDED = 'ended';
 
+    /**
+     * Active, but another party of the same host is the one driving Spotify.
+     *
+     * A Spotify account has one player, so only one party can steer it. Two parties syncing
+     * against the same account both claim the running track as their own and both push wishes
+     * into the same queue - which is exactly what happened on 2026-11-09.
+     */
+    public const SYNC_STANDBY = 'standby';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]

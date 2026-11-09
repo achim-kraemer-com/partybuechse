@@ -7,6 +7,7 @@ namespace App\Tests\Service;
 use App\Entity\Party;
 use App\Entity\Suggestion;
 use App\Entity\SuggestionStatus;
+use App\Repository\PartyRepository;
 use App\Repository\SuggestionRepository;
 use App\Service\PlaybackSync;
 use App\Service\VotingService;
@@ -31,6 +32,7 @@ final class PlaybackSyncTest extends KernelTestCase
     private MockClock $clock;
     private PlaybackSync $sync;
     private SuggestionRepository $suggestions;
+    private PartyRepository $parties;
     private VotingService $voting;
     private Party $party;
     private Suggestion $top;
@@ -45,6 +47,7 @@ final class PlaybackSyncTest extends KernelTestCase
         $this->resetSchema($this->em);
 
         $this->suggestions = $container->get(SuggestionRepository::class);
+        $this->parties = $container->get(PartyRepository::class);
         $this->voting = $container->get(VotingService::class);
         $this->spotify = new FakeSpotifyApi();
         $this->clock = new MockClock('2026-11-09 21:00:00');
@@ -52,6 +55,7 @@ final class PlaybackSyncTest extends KernelTestCase
         $this->sync = new PlaybackSync(
             $this->spotify,
             $this->suggestions,
+            $this->parties,
             $this->em,
             $this->clock,
             new LockFactory(new InMemoryStore()),
@@ -80,6 +84,34 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertNull($this->party->getNowPlaying());
         self::assertNotContains('queue', $this->spotify->callNames());
         self::assertSame(SuggestionStatus::Open, $this->top->getStatus());
+    }
+
+    /**
+     * Ein Spotify-Konto hat einen Player, also steuert ihn genau eine Party: die zuletzt
+     * gestartete. Liefen zwei, buchten beide den laufenden Titel als ihren eigenen und legten
+     * beide Wuensche in dieselbe Warteschlange.
+     */
+    public function testOnlyTheNewestActivePartyOfAHostSteersSpotify(): void
+    {
+        $newer = Fixtures::party(
+            $this->em,
+            $this->party->getHost(),
+            $this->clock->now()->modify('+1 minute'),
+            code: 'TEST2',
+            name: 'Die neue Party',
+        );
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 185_000, isPlaying: true);
+
+        $result = $this->sync->sync($this->party);
+
+        self::assertSame(Party::SYNC_STANDBY, $result->status);
+        self::assertStringContainsString('Die neue Party', (string) $result->message);
+        self::assertNull($this->party->getNowPlaying());
+        self::assertSame(SuggestionStatus::Open, $this->top->getStatus());
+        self::assertSame([], $this->spotify->calls, 'Eine Nebenparty darf Spotify nicht einmal lesen.');
+
+        // Die zuletzt gestartete steuert.
+        self::assertSame(Party::SYNC_OK, $this->sync->sync($newer)->status);
     }
 
     public function testNothingHappensWhileTheCurrentTrackHasPlentyOfTimeLeft(): void

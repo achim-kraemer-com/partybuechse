@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Entity\Party;
 use App\Entity\Suggestion;
+use App\Repository\PartyRepository;
 use App\Repository\SuggestionRepository;
 use App\Spotify\PlaybackState;
 use App\Spotify\SpotifyApiException;
@@ -27,6 +28,9 @@ use Symfony\Component\Lock\LockFactory;
  *
  * The host keeps playing whatever they like in Spotify; wishes are inserted via the queue,
  * so the host's own playlist acts as a natural fallback.
+ *
+ * Only the host's most recently started party steers the player; any other active party of the
+ * same host goes to SYNC_STANDBY and keeps its hands off Spotify (see Party::SYNC_STANDBY).
  */
 class PlaybackSync
 {
@@ -49,6 +53,7 @@ class PlaybackSync
     public function __construct(
         private readonly SpotifyApiInterface $spotify,
         private readonly SuggestionRepository $suggestions,
+        private readonly PartyRepository $parties,
         private readonly EntityManagerInterface $entityManager,
         private readonly ClockInterface $clock,
         private readonly LockFactory $lockFactory,
@@ -91,6 +96,22 @@ class PlaybackSync
 
         if (!$party->isActive()) {
             return new SyncResult(Party::SYNC_ENDED, 'Die Party ist beendet.');
+        }
+
+        // Ein Spotify-Konto hat genau einen Player. Lief eine zweite Party gegen dasselbe
+        // Konto, buchten beide den laufenden Titel als ihren eigenen und legten beide Wuensche
+        // in dieselbe Warteschlange. Nur die zuletzt gestartete Party steuert.
+        $current = $this->parties->findCurrentByHost($host);
+        if (null !== $current && $current->getId() !== $party->getId()) {
+            $party->setNowPlaying(null);
+            $party->setSync(Party::SYNC_STANDBY, sprintf(
+                'Die Musik läuft über die Party „%s“ (%s). Beende sie, wenn diese hier übernehmen soll.',
+                $current->getName(),
+                $current->getCode(),
+            ), $now);
+            $this->entityManager->flush();
+
+            return new SyncResult(Party::SYNC_STANDBY, $party->getSyncMessage());
         }
 
         try {

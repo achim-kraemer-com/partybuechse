@@ -24,9 +24,9 @@ final class Fixtures
         return $host;
     }
 
-    public static function party(EntityManagerInterface $em, Host $host, \DateTimeImmutable $now, int $votesPerGuest = 3): Party
+    public static function party(EntityManagerInterface $em, Host $host, \DateTimeImmutable $now, int $votesPerGuest = 3, string $code = 'TEST1', string $name = 'Testparty'): Party
     {
-        $party = new Party($host, 'TEST1', str_repeat('a', 24), 'Testparty', $now);
+        $party = new Party($host, $code, str_repeat('a', 24), $name, $now);
         $party->setVotesPerGuest($votesPerGuest);
         $em->persist($party);
         $em->flush();

@@ -272,6 +272,7 @@ label { display: block; font-size: .85rem; color: var(--text-secondary); margin-
 }
 .flash-success { border-color: rgba(52, 211, 153, .35); }
 .flash-error { border-color: rgba(239, 68, 68, .45); color: #fecaca; }
+.flash-info { border-color: rgba(129, 140, 248, .35); }
 .toast {
     position: fixed;
     left: 50%;
@@ -378,6 +379,7 @@ label { display: block; font-size: .85rem; color: var(--text-secondary); margin-
 .status-pill.no_device .dot, .status-pill.idle .dot { background: #fbbf24; }
 .status-pill.error .dot { background: var(--error-color); }
 .status-pill.ended .dot { background: var(--text-muted); }
+.status-pill.standby .dot { background: #818cf8; } /* aktiv, aber eine andere Party steuert Spotify */
 
 /* ---------- QR ---------- */
 .qr-card { background: #fff; color: #080b11; border-radius: var(--radius); padding: 18px; text-align: center; }

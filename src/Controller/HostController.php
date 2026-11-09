@@ -77,10 +77,27 @@ class HostController extends AbstractController
         $party->setVotesPerGuest($request->request->getInt('votes_per_guest', 3));
         $party->setFallbackPlaylistUri(SpotifyUri::normalizePlaylist($request->request->get('fallback_playlist')));
 
+        // Ein Spotify-Konto, ein Player, eine Party: die vorige wird beendet. Liefen zwei
+        // gleichzeitig, buchten beide den laufenden Titel als ihren eigenen und legten beide
+        // Wuensche in dieselbe Warteschlange.
+        $ended = [];
+        foreach ($this->parties->findActiveByHost($host) as $running) {
+            $running->end($this->clock->now());
+            $ended[] = $running->getName();
+        }
+
         $this->entityManager->persist($party);
         $this->entityManager->flush();
 
         $this->addFlash('success', sprintf('Party „%s“ angelegt. Code: %s', $party->getName(), $party->getCode()));
+        if ([] !== $ended) {
+            $this->addFlash('info', sprintf(
+                'Dafür %s beendet – pro Spotify-Konto steuert immer nur eine Party die Musik.',
+                1 === \count($ended)
+                    ? sprintf('wurde „%s“', $ended[0])
+                    : sprintf('wurden „%s“', implode('“, „', $ended)),
+            ));
+        }
 
         return $this->redirectToRoute('host_party', ['code' => $party->getCode()]);
     }
@@ -206,6 +223,18 @@ class HostController extends AbstractController
         $party = $this->ownParty($host, $code);
 
         if ($this->isCsrfTokenValid('host_party_action', (string) $request->request->get('_token'))) {
+            // Nicht automatisch die laufende beenden: eine alte Party wieder zu oeffnen,
+            // waehrend eine andere laeuft, ist eher ein Versehen als eine Absicht.
+            $running = $this->parties->findCurrentByHost($host);
+            if (null !== $running && $running->getId() !== $party->getId()) {
+                $this->addFlash('error', sprintf(
+                    'Die Party „%s“ läuft noch. Beende sie zuerst – pro Spotify-Konto steuert immer nur eine Party die Musik.',
+                    $running->getName(),
+                ));
+
+                return $this->redirectToRoute('host_party', ['code' => $party->getCode()]);
+            }
+
             $party->reopen();
             $this->entityManager->flush();
             $this->addFlash('success', 'Party wieder geöffnet.');
@@ -224,7 +253,11 @@ class HostController extends AbstractController
 
         if ($this->isCsrfTokenValid('host_party_action', (string) $request->request->get('_token'))) {
             $result = $sync->sync($party);
-            $this->addFlash(Party::SYNC_ERROR === $result->status ? 'error' : 'success', $result->message ?? 'Abgleich mit Spotify erledigt, nichts zu tun.');
+            $this->addFlash(match ($result->status) {
+                Party::SYNC_ERROR => 'error',
+                Party::SYNC_STANDBY => 'info',
+                default => 'success',
+            }, $result->message ?? 'Abgleich mit Spotify erledigt, nichts zu tun.');
         }
 
         return $this->redirectToRoute('host_party', ['code' => $party->getCode()]);

@@ -118,6 +118,8 @@ symfony serve --port=8000 --allow-all-ip      # oder php -S 0.0.0.0:8000 -t publ
 
 und `PUBLIC_BASE_URL=http://192.168.178.20:8000` (deine LAN-Adresse) setzen. Die Spotify-Verbindung läuft weiter über `http://127.0.0.1:8000`, also die Host-Ansicht auf dem Rechner öffnen, auf dem die App läuft. Auf dem gehosteten Server entfällt das alles.
 
+**Eine Party zur Zeit.** Ein Spotify-Konto hat genau einen Player, also steuert ihn genau eine Party: die zuletzt gestartete. Eine neue Party beendet deshalb die laufende, und eine alte lässt sich nicht wieder öffnen, solange eine andere läuft. Andere aktive Partys desselben Hosts gehen auf `standby` und fassen Spotify nicht an – liefen zwei gleichzeitig, verbuchten beide den laufenden Titel als ihren eigenen und legten beide Wünsche in dieselbe Warteschlange.
+
 Ohne Hintergrundprozess: Jede offene Seite (Gast, Display, Host) stößt alle paar Sekunden den Abgleich mit Spotify an. Läuft keine Seite, kann optional `php bin/console app:party:sync --watch` übernehmen.
 
 ## 6. Wie der Abgleich funktioniert

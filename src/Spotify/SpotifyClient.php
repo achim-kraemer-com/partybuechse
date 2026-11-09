@@ -16,10 +16,12 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  * Every call is made with the host's token; a 401 triggers one token refresh and a retry.
  *
  * No request sends a "market" parameter. With a user access token Spotify already
- * restricts the result to the country of that account, which is what we want. The
- * explicit "market=from_token" additionally needs the "user-read-private" scope –
- * without it every call is answered with 403 "Insufficient client scope", and that
- * scope is deliberately not requested (see SpotifyAuthenticator::SCOPES).
+ * restricts the result to the country of that account, so the parameter buys us
+ * nothing. The explicit "market=from_token" even costs us /search: that endpoint
+ * answers 403 "Insufficient client scope" unless the token carries
+ * "user-read-private", which SpotifyAuthenticator::SCOPES deliberately does not
+ * request. (/tracks happens to tolerate from_token, so the bug only showed up in
+ * the guest search.)
  */
 class SpotifyClient implements SpotifyApiInterface
 {

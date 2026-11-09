@@ -118,6 +118,24 @@ symfony serve --port=8000 --allow-all-ip      # oder php -S 0.0.0.0:8000 -t publ
 
 und `PUBLIC_BASE_URL=http://192.168.178.20:8000` (deine LAN-Adresse) setzen. Die Spotify-Verbindung läuft weiter über `http://127.0.0.1:8000`, also die Host-Ansicht auf dem Rechner öffnen, auf dem die App läuft. Auf dem gehosteten Server entfällt das alles.
 
+### Als App installieren
+
+Die Seite ist eine PWA: In Chrome erscheint in der Adressleiste ein **Installieren**-Knopf
+(oder ⋮ → *Streamen, speichern und teilen* → *Seite als App installieren*), auf dem iPhone
+geht es über *Teilen* → *Zum Home-Bildschirm*. Die App startet dann ohne Adressleiste in
+einem eigenen Fenster, mit eigenem Icon im Dock bzw. auf dem Home-Bildschirm.
+
+Dazu gehören `public/manifest.webmanifest`, die Icons in `public/icons/` und
+`public/sw.js`. Der Service Worker speichert bewusst fast nichts zwischen – er arbeitet
+"erst das Netz, dann der Zwischenspeicher" – und dient nur zwei Zwecken: Chrome bietet das
+Installieren ohne ihn nicht an, und ohne Netz erscheint `public/offline.html` statt der
+Fehlerseite des Browsers. Offline nutzbar ist die Partybüchse nicht, Wunschliste und
+Spotify liegen auf dem Server.
+
+Ändert sich eine der Dateien, die `sw.js` unter `SHELL` vorhält, gehört `VERSION` darin
+hochgezählt. `tests/WebApp/InstallableAppTest.php` prüft Manifest, Icon-Größen und dass
+jede vorgehaltene Datei existiert.
+
 **Eine Party zur Zeit.** Ein Spotify-Konto hat genau einen Player, also steuert ihn genau eine Party: die zuletzt gestartete. Eine neue Party beendet deshalb die laufende, und eine alte lässt sich nicht wieder öffnen, solange eine andere läuft. Andere aktive Partys desselben Hosts gehen auf `standby` und fassen Spotify nicht an – liefen zwei gleichzeitig, verbuchten beide den laufenden Titel als ihren eigenen und legten beide Wünsche in dieselbe Warteschlange.
 
 Ohne Hintergrundprozess: Jede offene Seite (Gast, Display, Host) stößt alle paar Sekunden den Abgleich mit Spotify an. Läuft keine Seite, kann optional `php bin/console app:party:sync --watch` übernehmen.

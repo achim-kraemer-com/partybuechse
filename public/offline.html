@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#7c3aed">
+    <title>Keine Verbindung – Partybüchse</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<!--
+    Vom Service Worker ausgeliefert, wenn das Netz weg ist. Reines HTML ohne Twig: der
+    Service Worker holt die Datei aus seinem Zwischenspeicher, da läuft kein PHP mehr.
+-->
+<body>
+    <div class="glow glow-a" aria-hidden="true"></div>
+    <div class="glow glow-b" aria-hidden="true"></div>
+
+    <header class="topbar">
+        <a class="brand" href="/">
+            <span class="monogram">PB</span>
+            <span class="brand-text">
+                <span class="brand-name">Partybüchse</span>
+                <span class="brand-sub">Deine Gäste. Deine Playlist.</span>
+            </span>
+        </a>
+    </header>
+
+    <main class="page page-narrow">
+        <section class="hero">
+            <span class="eyebrow"><span class="dot"></span> Offline</span>
+            <h1>Keine <span class="gradient-text">Verbindung</span></h1>
+            <p class="lead">
+                Die Partybüchse braucht das Netz: die Wunschliste und Spotify liegen auf dem
+                Server. Sobald du wieder online bist, geht es weiter – die Party läuft derweil
+                einfach weiter.
+            </p>
+            <a class="btn btn-primary" href="/">Nochmal versuchen</a>
+        </section>
+    </main>
+</body>
+</html>

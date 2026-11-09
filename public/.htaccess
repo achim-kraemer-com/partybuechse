@@ -11,6 +11,18 @@ DirectoryIndex index.php
 # when compiling LESS/Sass/CoffeScript assets.
 # Options +FollowSymlinks
 
+# Web-App-Manifest: Apache kennt die Endung nicht, ohne Typ meckern die Entwicklerwerkzeuge.
+# Der Service Worker darf nicht zwischengespeichert werden, sonst merkt der Browser eine
+# neue Fassung erst nach bis zu einem Tag.
+<IfModule mod_mime.c>
+    AddType application/manifest+json .webmanifest
+</IfModule>
+<IfModule mod_headers.c>
+    <Files "sw.js">
+        Header set Cache-Control "no-cache"
+    </Files>
+</IfModule>
+
 # Disabling MultiViews prevents unpredictable behavior.
 <IfModule mod_negotiation.c>
     Options -MultiViews

@@ -14,6 +14,12 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  * Thin wrapper around the Spotify Web API endpoints used by the app.
  *
  * Every call is made with the host's token; a 401 triggers one token refresh and a retry.
+ *
+ * No request sends a "market" parameter. With a user access token Spotify already
+ * restricts the result to the country of that account, which is what we want. The
+ * explicit "market=from_token" additionally needs the "user-read-private" scope –
+ * without it every call is answered with 403 "Insufficient client scope", and that
+ * scope is deliberately not requested (see SpotifyAuthenticator::SCOPES).
  */
 class SpotifyClient implements SpotifyApiInterface
 {
@@ -39,7 +45,6 @@ class SpotifyClient implements SpotifyApiInterface
                 'q' => $query,
                 'type' => 'track',
                 'limit' => max(1, min(10, $limit)), // development mode caps search results at 10
-                'market' => 'from_token',
             ],
         ]);
 
@@ -60,7 +65,7 @@ class SpotifyClient implements SpotifyApiInterface
         }
 
         try {
-            $data = $this->call($host, 'GET', '/tracks/'.$id, ['query' => ['market' => 'from_token']]);
+            $data = $this->call($host, 'GET', '/tracks/'.$id);
         } catch (SpotifyApiException $e) {
             if (404 === $e->statusCode) {
                 return null;

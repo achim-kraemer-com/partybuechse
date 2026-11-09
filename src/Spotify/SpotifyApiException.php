@@ -38,7 +38,10 @@ class SpotifyApiException extends \RuntimeException
             $this->isNoActiveDevice() => 'Kein aktives Spotify-Gerät. Starte die Wiedergabe in Spotify, dann übernimmt die Partybüchse.',
             $this->isRateLimited() => 'Spotify bremst gerade (Rate Limit). Nächster Versuch gleich.',
             401 === $this->statusCode => 'Spotify-Anmeldung abgelaufen. Bitte als Host neu anmelden.',
-            403 === $this->statusCode => 'Spotify verweigert den Zugriff (403). Ist dein Konto im Developer Dashboard freigeschaltet?',
+            403 === $this->statusCode => sprintf(
+                'Spotify verweigert den Zugriff (403: %s). Ist dein Konto im Developer Dashboard freigeschaltet?',
+                $this->getMessage(),
+            ),
             default => 'Spotify-Fehler: '.$this->getMessage(),
         };
     }

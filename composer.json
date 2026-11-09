@@ -15,6 +15,7 @@
         "doctrine/doctrine-migrations-bundle": "^3.7.1",
         "doctrine/orm": "^3.7.6",
         "endroid/qr-code": "^6.0.9",
+        "symfony/apache-pack": "^1.0",
         "symfony/asset": "7.4.*",
         "symfony/clock": "7.4.*",
         "symfony/console": "7.4.*",

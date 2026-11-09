@@ -33,7 +33,11 @@ class PlaybackSync
     /** Hand the next wish to Spotify when at most this much of the current track is left. */
     public const QUEUE_AHEAD_MS = 20_000;
 
-    /** A queued wish that has not shown up for this long is considered consumed. */
+    /**
+     * Last resort for a queued wish while Spotify's queue cannot be read: after this long
+     * without the wish coming on, it counts as consumed. As long as the queue *can* be read,
+     * what it says decides - a wish still listed there waits however long it takes.
+     */
     public const STALE_QUEUE_SECONDS = 20 * 60;
 
     /** Give Spotify this long to reflect a queue change before judging it lost. */
@@ -176,17 +180,27 @@ class PlaybackSync
                 continue;
             }
 
-            if ($age >= self::STALE_QUEUE_SECONDS) {
-                $wish->markPlayed($now);
-                $actions[] = sprintf('Aus der Warteschlange verschwunden: %s', $this->label($wish));
+            $queueUris ??= $this->safeQueueUris($party);
+
+            // Liegt der Titel noch in Spotifys Warteschlange, warten wir – ganz egal, wie lange
+            // das dauert. Eine lange Warteschlange braucht ihre Zeit, und ihn nach 20 Minuten
+            // als verschwunden zu buchen, obwohl Spotify ihn noch hat, nimmt den Wunsch aus der
+            // Liste, bevor er gelaufen ist.
+            if (null !== $queueUris && \in_array($wish->getSpotifyUri(), $queueUris, true)) {
                 continue;
             }
 
-            $queueUris ??= $this->safeQueueUris($party);
-            if (null !== $queueUris && !\in_array($wish->getSpotifyUri(), $queueUris, true)) {
-                $wish->markPlayed($now);
-                $actions[] = sprintf('Nicht mehr in der Warteschlange: %s', $this->label($wish));
+            if (null === $queueUris) {
+                // Warteschlange nicht lesbar: dann bleibt nur das Alter als Anhaltspunkt.
+                if ($age >= self::STALE_QUEUE_SECONDS) {
+                    $wish->markPlayed($now);
+                    $actions[] = sprintf('Aus der Warteschlange verschwunden: %s', $this->label($wish));
+                }
+                continue;
             }
+
+            $wish->markPlayed($now);
+            $actions[] = sprintf('Nicht mehr in der Warteschlange: %s', $this->label($wish));
         }
 
         $this->entityManager->flush();

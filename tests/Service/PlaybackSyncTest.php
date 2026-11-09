@@ -193,6 +193,30 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
     }
 
+    /**
+     * Eine lange Warteschlange braucht ihre Zeit. Solange Spotify den Titel noch fuehrt, darf
+     * er nicht als verschwunden gebucht werden – sonst fliegt der Wunsch aus der Liste, bevor
+     * er ueberhaupt gelaufen ist. Erst wenn die Warteschlange nicht lesbar ist, entscheidet
+     * das Alter.
+     */
+    public function testWishStillListedBySpotifyWaitsLongerThanTheStaleLimit(): void
+    {
+        $this->top->markQueued($this->clock->now());
+        $this->em->flush();
+        $this->spotify->queue = [$this->top->getSpotifyUri()];
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 30_000, isPlaying: true);
+
+        $this->clock->sleep(PlaybackSync::STALE_QUEUE_SECONDS + 60);
+        $this->sync->sync($this->party);
+
+        self::assertSame(SuggestionStatus::Queued, $this->top->getStatus());
+
+        // Erst wenn Spotify ihn nicht mehr fuehrt, gilt er als verbraucht.
+        $this->spotify->queue = [];
+        $this->sync->sync($this->party);
+        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
+    }
+
     public function testWishPlayedManuallyByTheHostCountsAsPlayed(): void
     {
         $this->spotify->state = $this->playing($this->second->toTrackInfo(), progressMs: 5_000, isPlaying: true);

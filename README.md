@@ -22,7 +22,15 @@ Hinweise zum aktuellen Development Mode von Spotify (Stand 2026):
 - Nur das eigene Konto (plus max. 4 weitere in der Allowlist) darf sich bei Spotify anmelden. Für die Partybüchse reicht das: **nur der Host verbindet Spotify**, Gäste sprechen nie mit Spotify.
 - Suchergebnisse sind auf 10 pro Anfrage begrenzt; die App cached Suchen für zwei Minuten.
 
-## 2. Konfiguration (`.env.local`)
+## 2. Konfiguration (`.env`)
+
+Im Repository liegt als Env-Vorlage nur `.env.dist` – mit Platzhaltern, ohne Zugangsdaten. Die eigene Konfiguration ist eine Kopie davon und bleibt lokal, denn `.env` und `.env.local` sind von Git ignoriert:
+
+```bash
+cp .env.dist .env
+```
+
+Mindestens diese Werte gehören dort hinein:
 
 ```dotenv
 APP_SECRET=ein-langer-zufaelliger-string
@@ -54,7 +62,7 @@ symfony serve --port=8000 # oder: php -S 127.0.0.1:8000 -t public
 
 ## 4. Docker
 
-Zum Testen und für den gehosteten Server gibt es ein Image (Apache + PHP 8.3, SQLite in einem Volume). Compose liest deine `.env.local` ein, es ist also dieselbe Datei wie ohne Docker.
+Zum Testen und für den gehosteten Server gibt es ein Image (Apache + PHP 8.3, SQLite in einem Volume). Compose liest `.env` und `.env.local` ein, es sind also dieselben Dateien wie ohne Docker.
 
 ```bash
 docker compose up --build -d        # http://127.0.0.1:8000
@@ -86,7 +94,7 @@ partybuechse.example.de {
 }
 ```
 
-Dann in `.env.local` auf dem Server:
+Dann in `.env` auf dem Server:
 
 ```dotenv
 SPOTIFY_REDIRECT_URI=https://partybuechse.example.de/spotify/callback

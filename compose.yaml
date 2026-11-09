@@ -3,7 +3,8 @@
 #   docker compose up --build -d          # production-like build, http://127.0.0.1:8000
 #   DOCKER_APP_ENV=dev docker compose up --build   # dev build with profiler
 #
-# Secrets and Spotify settings are read from .env.local (same file you use without Docker).
+# Secrets and Spotify settings are read from .env / .env.local (the same files you use without
+# Docker; .env.dist in the repository is only the template).
 # Needed there: APP_SECRET, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI,
 # HOST_USERNAME, HOST_PASSWORD (or HOST_PASSWORD_HASH), PUBLIC_BASE_URL.
 
@@ -19,6 +20,8 @@ services:
     ports:
       - "${DOCKER_PORT:-8000}:80"
     env_file:
+      - path: .env
+        required: false
       - path: .env.local
         required: false
     environment:

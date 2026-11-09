@@ -33,16 +33,31 @@ when@test:
 when@prod:
     monolog:
         handlers:
-            # Eigene Datei neben php://stderr. Unter Plesk landet stderr in einem
-            # PHP-FPM-Log, an das man ohne root nicht herankommt – damit war nach
-            # einer Party nicht nachvollziehbar, was die Partybüchse getan hat.
+            # Jeder Fehler, aus jedem Kanal, in einer eigenen Datei. Nicht abgefangene
+            # Ausnahmen protokolliert Symfony im Kanal "request" – der unten aus dem
+            # Mitschnitt ausgeschlossen ist. Ohne diesen Handler bleibt also genau das
+            # unsichtbar, was man nach einem 500er sucht. Ein eigener Pfad, damit ein
+            # Fehler nicht zwischen hunderten Zeilen Mitschnitt untergeht:
+            #   tail -f var/log/prod.error-*.log
+            errors:
+                type: rotating_file
+                path: "%kernel.logs_dir%/%kernel.environment%.error.log"
+                level: error
+                max_files: 14
+
+            # Mitschnitt des normalen Betriebs neben php://stderr. Unter Plesk landet
+            # stderr in einem PHP-FPM-Log, an das man ohne root nicht herankommt – damit
+            # war nach einer Party nicht nachvollziehbar, was die Partybüchse getan hat.
             # var/log liegt ausserhalb der Dokumentwurzel (public/).
             file:
                 type: rotating_file
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: info
                 max_files: 7
-                channels: ["!event", "!deprecation", "!request"] # Routen-Treffer bei jedem Poll waeren nur Rauschen
+                # "request" schreibt bei jedem Poll den Routen-Treffer, "http_client" jeden
+                # einzelnen Spotify-Aufruf: zu zweit stellten sie 2274 von 2286 Zeilen des
+                # ersten Tages. Fehler aus beiden Kanaelen holt der "errors"-Handler.
+                channels: ["!event", "!deprecation", "!request", "!http_client"]
             main:
                 type: fingers_crossed
                 action_level: error

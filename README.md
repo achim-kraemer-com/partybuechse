@@ -282,3 +282,22 @@ Dokumentwurzel. Sie überlebt den Deploy, weil der Hook kein `git clean` läuft 
    `INVALID_CLIENT: Invalid redirect URI` ab.
 
 4. `git push main main` – jetzt läuft das Deployment durch.
+
+### Was tun, wenn im Betrieb etwas schiefgeht
+
+Die Anwendung schreibt im Prod-Betrieb zwei Dateien nach `var/log/` – ausserhalb
+der Dokumentwurzel, also nicht über das Web erreichbar:
+
+```bash
+ssh <host> 'cd <projekt> && tail -n 40 var/log/prod.error-*.log'   # jeder 500er, mit Stacktrace
+ssh <host> 'cd <projekt> && tail -f  var/log/prod-*.log'           # Mitschnitt: Anmeldungen, Spotify-Übergaben, Sync
+```
+
+Die beiden Dateien sind getrennt, weil der Mitschnitt im Partybetrieb schnell
+auf tausende Zeilen wächst und ein einzelner Fehler darin untergeht. Symfony
+protokolliert nicht abgefangene Ausnahmen im Kanal `request`; der ist aus dem
+Mitschnitt ausgeschlossen, landet aber vollständig in der Fehlerdatei.
+
+Unter Plesk hilft `php://stderr` nicht weiter: das führt in ein PHP-FPM-Log
+unter `/var/www/vhosts/system/<domain>/logs/`, das nur root lesen kann. Im
+Plesk-Panel ist es über **Websites & Domains → Protokolle** einsehbar.

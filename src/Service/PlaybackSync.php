@@ -216,19 +216,36 @@ class PlaybackSync
 
         if (null !== $top) {
             if ($idle) {
-                $this->spotify->startPlayback($host, [$top->getSpotifyUri()], null, $state->deviceId);
-                $top->markQueued($now);
-                $this->entityManager->flush();
-
-                return [sprintf('Gestartet: %s', $this->label($top))];
+                return $this->handOver(
+                    $party,
+                    $top,
+                    $now,
+                    'Gestartet',
+                    fn () => $this->spotify->startPlayback($host, [$top->getSpotifyUri()], null, $state->deviceId),
+                );
             }
 
             if ($state->isPlaying && null !== $remaining && $remaining <= self::QUEUE_AHEAD_MS) {
-                $this->spotify->addToQueue($host, $top->getSpotifyUri(), $state->deviceId);
-                $top->markQueued($now);
-                $this->entityManager->flush();
+                // Spotify selbst fragen, bevor wir etwas hineinlegen. Geht die Buchhaltung
+                // unten verloren, wandert derselbe Titel sonst bei jedem Poll erneut in die
+                // Warteschlange – bei 4 Sekunden Pollabstand fünfmal pro Fenster.
+                $queueUris = $this->safeQueueUris($party);
+                if (null !== $queueUris && \in_array($top->getSpotifyUri(), $queueUris, true)) {
+                    $this->logger->notice('Wish is already in Spotify\'s queue but still open in our list', [
+                        'party' => $party->getCode(),
+                        'wish' => $top->getSpotifyUri(),
+                    ]);
 
-                return [sprintf('In die Warteschlange: %s', $this->label($top))];
+                    return [];
+                }
+
+                return $this->handOver(
+                    $party,
+                    $top,
+                    $now,
+                    'In die Warteschlange',
+                    fn () => $this->spotify->addToQueue($host, $top->getSpotifyUri(), $state->deviceId),
+                );
             }
 
             return [];
@@ -242,6 +259,46 @@ class PlaybackSync
         }
 
         return [];
+    }
+
+    /**
+     * Hands one wish to Spotify and keeps both sides in step.
+     *
+     * The wish is recorded as queued *before* the call. The other way round, a lost
+     * write leaves Spotify holding the track while our list still shows it as open,
+     * and the next poll hands it over again. If Spotify refuses, the wish goes back
+     * into the ranking.
+     *
+     * @param callable(): void $call
+     *
+     * @return string[]
+     */
+    private function handOver(Party $party, Suggestion $wish, \DateTimeImmutable $now, string $what, callable $call): array
+    {
+        $wish->markQueued($now);
+        $this->entityManager->flush();
+
+        try {
+            $call();
+        } catch (\Throwable $e) {
+            $wish->reopen();
+            $this->entityManager->flush();
+            $this->logger->warning('Hand-over to Spotify failed, wish is back in the ranking', [
+                'party' => $party->getCode(),
+                'wish' => $wish->getSpotifyUri(),
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        $this->logger->info('Wish handed to Spotify', [
+            'party' => $party->getCode(),
+            'what' => $what,
+            'wish' => $wish->getSpotifyUri(),
+        ]);
+
+        return [sprintf('%s: %s', $what, $this->label($wish))];
     }
 
     /** @return string[]|null */

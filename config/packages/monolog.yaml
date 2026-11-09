@@ -33,6 +33,16 @@ when@test:
 when@prod:
     monolog:
         handlers:
+            # Eigene Datei neben php://stderr. Unter Plesk landet stderr in einem
+            # PHP-FPM-Log, an das man ohne root nicht herankommt – damit war nach
+            # einer Party nicht nachvollziehbar, was die Partybüchse getan hat.
+            # var/log liegt ausserhalb der Dokumentwurzel (public/).
+            file:
+                type: rotating_file
+                path: "%kernel.logs_dir%/%kernel.environment%.log"
+                level: info
+                max_files: 7
+                channels: ["!event", "!deprecation"]
             main:
                 type: fingers_crossed
                 action_level: error

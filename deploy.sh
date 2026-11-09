@@ -75,7 +75,7 @@ echo "→ Abhängigkeiten installieren"
 # ersten Deploy existiert sie noch nicht; PDO legt sie beim Verbinden an,
 # sobald das Verzeichnis da ist. Kein "doctrine:database:create": DBAL 4 kann
 # getListDatabasesSQL für SQLite nicht und bricht mit NotSupported ab.
-mkdir -p var
+mkdir -p var var/log
 
 echo "→ Datenbank migrieren"
 "$PHP" bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration

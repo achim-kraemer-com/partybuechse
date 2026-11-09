@@ -1,0 +1,25 @@
+
+###> symfony/framework-bundle ###
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/secrets/prod/prod.decrypt.private.php
+/public/bundles/
+/var/
+/vendor/
+###< symfony/framework-bundle ###
+
+###> phpunit/phpunit ###
+/phpunit.xml
+.phpunit.result.cache
+###< phpunit/phpunit ###
+
+###> symfony/web-profiler-bundle ###
+/.web-profiler-bundle
+###< symfony/web-profiler-bundle ###
+
+# handover note for the Obsidian inbox is kept out of the repo
+/docs/inbox/
+
+# one-off helpers and transfer archives
+/_to_delete/

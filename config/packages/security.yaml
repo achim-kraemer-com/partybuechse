@@ -1,0 +1,41 @@
+security:
+    # One host account, configured via HOST_USERNAME + HOST_PASSWORD (or HOST_PASSWORD_HASH), see .env
+    providers:
+        host_user:
+            id: App\Security\HostUserProvider
+
+    firewalls:
+        dev:
+            pattern: ^/(_(profiler|wdt)|css|images|js)/
+            security: false
+        main:
+            lazy: true
+            provider: host_user
+            custom_authenticators:
+                - App\Security\HostLoginAuthenticator
+            entry_point: App\Security\HostLoginAuthenticator
+            logout:
+                path: app_logout
+                target: home
+                enable_csrf: true
+            remember_me:
+                secret: '%kernel.secret%'
+                lifetime: 2592000 # 30 days
+                samesite: lax
+                secure: auto
+            login_throttling:
+                max_attempts: 5
+                interval: '15 minutes'
+
+    # Guests never log in: everything except the host area stays public.
+    access_control:
+        - { path: ^/login$, roles: PUBLIC_ACCESS }
+        - { path: ^/host, roles: ROLE_HOST }
+        - { path: ^/spotify/(login|callback), roles: ROLE_HOST }
+
+when@test:
+    security:
+        firewalls:
+            main:
+                login_throttling:
+                    max_attempts: 50

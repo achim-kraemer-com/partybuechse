@@ -1,0 +1,57 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ party.name }} – {{ app_name }}{% endblock %}
+{% block body_class %}display-mode{% endblock %}
+{% block header %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block flashes %}{% endblock %}
+
+{% block body %}
+<div id="display-app"
+     data-state-url="{{ path('api_state', {code: party.code}) }}"
+     data-initial="{{ state|json_encode|e('html_attr') }}">
+
+    <div class="display-brand">
+        <span class="brand">
+            <span class="monogram">PB</span>
+            <span class="brand-text">
+                <span class="brand-name">{{ party.name }}</span>
+                <span class="brand-sub">{{ app_name }} · <span id="guest-count"></span></span>
+            </span>
+        </span>
+        <span class="status-pill {{ party.syncStatus }}" id="sync-pill"><span class="dot"></span><span id="sync-text">{{ party.syncMessage ?? 'Bereit' }}</span></span>
+    </div>
+
+    <div class="display-grid">
+        <div class="stack">
+            <section class="card card-strong display-now" id="now-playing"></section>
+
+            <section class="card display-qr">
+                <div class="qr-card">
+                    <img src="{{ path('guest_qr', {code: party.code}) }}" alt="QR-Code zum Beitreten" width="170" height="170">
+                </div>
+                <div>
+                    <div class="section-label">Mitmachen</div>
+                    <h2>Scannen und <span class="gradient-text">wünschen</span></h2>
+                    <p class="muted" style="margin: 0 0 6px;">Oder im Browser öffnen:</p>
+                    <div class="mono small" style="word-break: break-all;">{{ join_url }}</div>
+                    <div style="margin-top: 10px;">Code: <span class="code-chip">{{ party.code }}</span></div>
+                </div>
+            </section>
+        </div>
+
+        <section class="card display-ranking">
+            <div class="card-title">
+                <h2>Wunschliste</h2>
+                <span class="muted small">Top-Wunsch läuft als Nächstes</span>
+            </div>
+            <ul class="track-list" id="ranking"></ul>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+    <script src="{{ asset('js/pb.js') }}"></script>
+    <script src="{{ asset('js/display.js') }}"></script>
+{% endblock %}

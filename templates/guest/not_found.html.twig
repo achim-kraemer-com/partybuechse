@@ -1,0 +1,13 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Party nicht gefunden – {{ app_name }}{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
+
+{% block body %}
+    <section class="hero">
+        <span class="eyebrow">Code {{ code }}</span>
+        <h1>Diese Party <span class="gradient-text">gibt es nicht</span></h1>
+        <p class="lead">Vielleicht ein Tippfehler? Schau noch einmal auf den QR-Code oder frag den Host nach dem Code.</p>
+        <a class="btn btn-primary" href="{{ path('home') }}">Code neu eingeben</a>
+    </section>
+{% endblock %}

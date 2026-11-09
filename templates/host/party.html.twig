@@ -1,0 +1,142 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ party.name }} – Host – {{ app_name }}{% endblock %}
+
+{% block nav %}
+    <a href="{{ path('host_dashboard') }}">Meine Partys</a>
+    <a class="btn btn-ghost btn-sm" href="{{ display_url }}" target="_blank" rel="noopener">Display öffnen</a>
+    <a class="btn btn-ghost btn-sm" href="{{ path('guest_party', {code: party.code}) }}" target="_blank" rel="noopener">Gast-Ansicht</a>
+{% endblock %}
+
+{% block page_class %}page-wide{% endblock %}
+
+{% block body %}
+<div id="host-app"
+     data-state-url="{{ path('api_state', {code: party.code}) }}"
+     data-remove-url="{{ path('host_suggestion_remove', {code: party.code, id: 0})|replace({'/0/remove': '/__ID__/remove'}) }}"
+     data-csrf="{{ csrf_token('host_party_action') }}"
+     data-initial="{{ state|json_encode|e('html_attr') }}">
+
+    <div class="row row-between" style="margin-bottom: 18px;">
+        <div>
+            <div class="section-label">Host-Ansicht</div>
+            <h1 style="font-size: clamp(1.6rem, 4vw, 2.4rem);">{{ party.name }}</h1>
+        </div>
+        <div class="row">
+            <span class="code-chip" title="Party-Code">{{ party.code }}</span>
+            <span class="status-pill {{ party.syncStatus }}" id="sync-pill"><span class="dot"></span><span id="sync-text">{{ party.syncMessage ?? 'Noch kein Abgleich' }}</span></span>
+        </div>
+    </div>
+
+    {% if not party.active %}
+        <div class="flash flash-error">Diese Party ist beendet. Gäste können nicht mehr wünschen oder abstimmen.</div>
+    {% endif %}
+
+    <div class="grid grid-host">
+        <div class="stack">
+            <section class="card card-strong">
+                <div class="card-title">
+                    <h3>Läuft gerade</h3>
+                    <div class="actions-inline">
+                        <form method="post" action="{{ path('host_party_skip', {code: party.code}) }}">
+                            <input type="hidden" name="_token" value="{{ csrf_token('host_party_action') }}">
+                            <button class="btn btn-ghost btn-sm" type="submit" title="Aktuellen Titel überspringen">
+                                <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5.5v13l9-6.5-9-6.5ZM17 5h2v14h-2z"/></svg>
+                                Überspringen
+                            </button>
+                        </form>
+                        <form method="post" action="{{ path('host_party_sync', {code: party.code}) }}">
+                            <input type="hidden" name="_token" value="{{ csrf_token('host_party_action') }}">
+                            <button class="btn btn-ghost btn-sm" type="submit" title="Jetzt mit Spotify abgleichen">Abgleichen</button>
+                        </form>
+                    </div>
+                </div>
+                <div id="now-playing"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-title">
+                    <h3>Wunschliste <span class="muted small" id="guest-count"></span></h3>
+                    <span class="muted small">{{ played_count }} gespielt</span>
+                </div>
+                <ul class="track-list" id="ranking"></ul>
+                <details style="margin-top: 16px;">
+                    <summary>Zuletzt gespielt</summary>
+                    <ul class="track-list" id="history" style="margin-top: 10px;"></ul>
+                </details>
+            </section>
+        </div>
+
+        <div class="stack">
+            <section class="card card-strong">
+                <div class="card-title"><h3>Gäste einladen</h3></div>
+                <div class="qr-card">
+                    <img src="{{ path('guest_qr', {code: party.code}) }}" alt="QR-Code zum Beitreten" width="300" height="300">
+                    <div class="qr-code">{{ party.code }}</div>
+                    <div class="qr-url">{{ join_url }}</div>
+                </div>
+                <div class="row" style="margin-top: 12px;">
+                    <button class="btn btn-ghost btn-sm" type="button" data-copy="{{ join_url }}">Link kopieren</button>
+                    <a class="btn btn-ghost btn-sm" href="{{ display_url }}" target="_blank" rel="noopener">Display für Beamer/TV</a>
+                </div>
+                {% if not public_url_configured %}
+                    <p class="help" style="margin-top: 12px;">Der QR-Code zeigt auf <span class="mono">{{ join_url }}</span>. Erreichen deine Gäste diese Adresse nicht (z. B. weil du über 127.0.0.1 arbeitest), setze <span class="mono">PUBLIC_BASE_URL</span> in <span class="mono">.env.local</span> auf deine Adresse im WLAN.</p>
+                {% endif %}
+            </section>
+
+            <section class="card">
+                <div class="card-title"><h3>Einstellungen</h3></div>
+                <form method="post" action="{{ path('host_party_settings', {code: party.code}) }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('host_party_settings') }}">
+                    <div class="field">
+                        <label for="name">Name</label>
+                        <input class="input" id="name" name="name" maxlength="80" value="{{ party.name }}">
+                    </div>
+                    <div class="field">
+                        <label for="votes_per_guest">Stimmen pro Gast</label>
+                        <select class="input" id="votes_per_guest" name="votes_per_guest">
+                            {% for n in 1..6 %}
+                                <option value="{{ n }}" {{ n == party.votesPerGuest ? 'selected' }}>{{ n }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="fallback_playlist">Fallback-Playlist</label>
+                        <input class="input" id="fallback_playlist" name="fallback_playlist" value="{{ party.fallbackPlaylistUri ?? '' }}" placeholder="https://open.spotify.com/playlist/…">
+                        <div class="help">Läuft, wenn nichts spielt und keine Wünsche offen sind.</div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" type="submit">Speichern</button>
+                </form>
+            </section>
+
+            <section class="card">
+                <div class="card-title"><h3>Party</h3></div>
+                <dl class="kv">
+                    <dt>Angelegt</dt><dd>{{ party.createdAt|date('d.m.Y H:i') }}</dd>
+                    <dt>Spotify</dt><dd>{{ host.displayName ?? host.spotifyUserId }}</dd>
+                    <dt>Display-Link</dt><dd><a href="{{ display_url }}" target="_blank" rel="noopener">{{ display_url }}</a></dd>
+                </dl>
+                <div class="actions-inline" style="margin-top: 16px;">
+                    {% if party.active %}
+                        <form method="post" action="{{ path('host_party_end', {code: party.code}) }}" onsubmit="return confirm('Party wirklich beenden? Gäste können dann nicht mehr wünschen.');">
+                            <input type="hidden" name="_token" value="{{ csrf_token('host_party_action') }}">
+                            <button class="btn btn-danger btn-sm" type="submit">Party beenden</button>
+                        </form>
+                    {% else %}
+                        <form method="post" action="{{ path('host_party_reopen', {code: party.code}) }}">
+                            <input type="hidden" name="_token" value="{{ csrf_token('host_party_action') }}">
+                            <button class="btn btn-primary btn-sm" type="submit">Party wieder öffnen</button>
+                        </form>
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block javascripts %}
+    <script src="{{ asset('js/pb.js') }}"></script>
+    <script src="{{ asset('js/host.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ app_name }} – Deine Gäste wählen die Musik{% endblock %}
+
+{% block nav %}
+    {% if app.user %}
+        <a href="{{ path('host_dashboard') }}">Meine Partys</a>
+        <form method="post" action="{{ path('app_logout') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+            <button class="btn btn-ghost btn-sm" type="submit">Abmelden</button>
+        </form>
+    {% else %}
+        <a class="btn btn-ghost" href="{{ path('app_login') }}">Host-Login</a>
+    {% endif %}
+{% endblock %}
+
+{% block page_class %}page-narrow{% endblock %}
+
+{% block body %}
+    <section class="hero">
+        <span class="eyebrow"><span class="dot"></span> QR-Code scannen, wünschen, abstimmen</span>
+        <h1>Deine Gäste <span class="gradient-text">machen die Musik</span></h1>
+        <p class="lead">Jeder Gast hat drei Stimmen, wünscht sich Songs aus dem Spotify-Katalog und bewertet die Wünsche der anderen. Was vorne liegt, läuft als Nächstes.</p>
+        <div class="stats">
+            <span class="stat"><strong>3</strong> Stimmen pro Gast</span>
+            <span class="stat"><strong>0</strong> Apps zu installieren</span>
+            <span class="stat"><strong>1</strong> Spotify-Konto (deins)</span>
+        </div>
+    </section>
+
+    <div class="grid grid-2">
+        <section class="card card-strong">
+            <div class="section-label">Ich bin Gast</div>
+            <h2>Party beitreten</h2>
+            <p class="muted small">Scanne den QR-Code oder tippe den Code ein, der auf dem Bildschirm steht.</p>
+            <form method="post" action="{{ path('join') }}" class="field-row">
+                <div>
+                    <label for="code">Party-Code</label>
+                    <input class="input input-lg input-code" id="code" name="code" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC12" required>
+                </div>
+                <button class="btn btn-primary" type="submit">Los geht’s</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="section-label">Ich bin Host</div>
+            <h2>Party starten</h2>
+            <p class="muted small">Melde dich als Host an und verbinde dein Spotify-Premium-Konto. Die Musik läuft auf deinem Gerät, die Gäste steuern nur die Wunschliste.</p>
+            {% if app.user %}
+                <a class="btn btn-primary" href="{{ path('host_dashboard') }}">Zu meinen Partys</a>
+            {% else %}
+                <a class="btn btn-primary" href="{{ path('app_login') }}">Als Host anmelden</a>
+            {% endif %}
+        </section>
+    </div>
+
+    <section class="stack" style="margin-top: 36px;">
+        <div class="section-label center">So läuft’s</div>
+        <ol class="steps card">
+            <li><strong>Host:</strong> Anmelden, Spotify verbinden, Party anlegen, Spotify auf dem Partygerät starten.</li>
+            <li><strong>Gäste:</strong> QR-Code scannen, bis zu drei Songs wünschen oder für andere Wünsche stimmen.</li>
+            <li><strong>Partybüchse:</strong> Kurz vor Ende des laufenden Titels wandert der bestbewertete Wunsch in die Spotify-Warteschlange.</li>
+            <li><strong>Stimmen zurück:</strong> Sobald ein Wunsch gelaufen ist, bekommen alle Wähler ihre Stimme wieder.</li>
+        </ol>
+    </section>
+{% endblock %}

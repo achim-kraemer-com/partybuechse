@@ -1,0 +1,67 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ party.name }} – {{ app_name }}{% endblock %}
+{% block brand_sub %}{{ party.name }}{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
+
+{% block nav %}
+    <span class="code-chip" title="Party-Code">{{ party.code }}</span>
+{% endblock %}
+
+{% block body %}
+<div id="guest-app"
+     data-state-url="{{ path('api_state', {code: party.code}) }}"
+     data-search-url="{{ path('api_search', {code: party.code}) }}"
+     data-suggest-url="{{ path('api_suggest', {code: party.code}) }}"
+     data-vote-url="{{ path('api_vote', {code: party.code, id: 0})|replace({'/vote/0': '/vote/__ID__'}) }}"
+     data-nickname-url="{{ path('api_nickname', {code: party.code}) }}"
+     data-initial="{{ state|json_encode|e('html_attr') }}">
+
+    {% if not party.active %}
+        <div class="flash flash-error">Diese Party ist beendet. Danke fürs Mitmachen!</div>
+    {% endif %}
+
+    <section class="card card-strong card-pad-sm" style="margin-bottom: 14px;">
+        <div id="now-playing"></div>
+    </section>
+
+    <div class="guest-head">
+        <div>
+            <div class="section-label">Deine Stimmen</div>
+            <div class="votes-left" id="votes-left"></div>
+        </div>
+        <div class="nick-row">
+            <input class="input" id="nickname" maxlength="40" placeholder="Dein Name (optional)" value="{{ guest.nickname ?? '' }}" autocomplete="nickname">
+            <button class="btn btn-ghost btn-sm" type="button" id="nickname-save">OK</button>
+        </div>
+    </div>
+
+    <section class="card card-pad-sm" style="margin-bottom: 14px;">
+        <label for="search">Song wünschen</label>
+        <div class="search-wrap">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input class="input" id="search" type="search" placeholder="Titel oder Künstler…" autocomplete="off" {{ party.active ? '' : 'disabled' }}>
+            <span class="spinner hidden" id="search-spinner"></span>
+        </div>
+        <ul class="track-list results" id="results"></ul>
+    </section>
+
+    <section class="card card-pad-sm">
+        <div class="card-title">
+            <h3>Wunschliste</h3>
+            <span class="muted small" id="guest-count"></span>
+        </div>
+        <ul class="track-list" id="ranking"></ul>
+        <details style="margin-top: 14px;">
+            <summary>Zuletzt gespielt</summary>
+            <ul class="track-list" id="history" style="margin-top: 10px;"></ul>
+        </details>
+    </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block javascripts %}
+    <script src="{{ asset('js/pb.js') }}"></script>
+    <script src="{{ asset('js/guest.js') }}"></script>
+{% endblock %}

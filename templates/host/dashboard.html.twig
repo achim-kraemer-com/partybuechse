@@ -1,0 +1,98 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Meine Partys – {{ app_name }}{% endblock %}
+
+{% block nav %}
+    <span class="muted small">{{ app.user.userIdentifier }}{% if host %} · Spotify: {{ host.displayName ?? host.spotifyUserId }}{% endif %}</span>
+    <form method="post" action="{{ path('app_logout') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+        <button class="btn btn-ghost btn-sm" type="submit">Abmelden</button>
+    </form>
+{% endblock %}
+
+{% block body %}
+    {% if host is null %}
+        <section class="hero" style="padding-bottom: 8px;">
+            <span class="eyebrow">Schritt 1 von 2</span>
+            <h1>Spotify <span class="gradient-text">verbinden</span></h1>
+            <p class="lead">Die Musik läuft über dein Spotify-Premium-Konto. Verbinde es einmal, danach bleibt die Verbindung bestehen.</p>
+            {% if spotify_configured %}
+                <a class="btn btn-primary" href="{{ path('spotify_login') }}">
+                    <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm4.6 14.4a.6.6 0 0 1-.85.2c-2.3-1.4-5.2-1.7-8.6-.95a.62.62 0 0 1-.28-1.2c3.7-.85 6.9-.5 9.5 1.1.3.17.4.55.22.85Zm1.2-2.7a.78.78 0 0 1-1.07.26c-2.65-1.63-6.7-2.1-9.83-1.15a.78.78 0 1 1-.45-1.5c3.57-1.08 8-.55 11.08 1.33.37.22.48.7.27 1.06Zm.1-2.8C14.7 9 9.5 8.8 6.5 9.72a.93.93 0 1 1-.55-1.78c3.47-1.05 9.2-.85 12.84 1.3a.93.93 0 0 1-.95 1.6Z"/></svg>
+                    Mit Spotify verbinden
+                </a>
+            {% else %}
+                <div class="flash flash-error" style="text-align: left; max-width: 560px; margin: 0 auto;">
+                    Spotify ist noch nicht eingerichtet. Trage <code>SPOTIFY_CLIENT_ID</code> und <code>SPOTIFY_CLIENT_SECRET</code>
+                    in <code>.env.local</code> (bzw. in der Docker-Umgebung) ein, siehe README.
+                </div>
+            {% endif %}
+        </section>
+    {% else %}
+    <div class="grid grid-host">
+        <section class="card card-strong">
+            <div class="section-label">Neue Party</div>
+            <h2>Party anlegen</h2>
+            <p class="muted small">Du bekommst einen Code und einen QR-Code für deine Gäste. Starte danach in Spotify die Wiedergabe auf dem Gerät, das an den Boxen hängt.</p>
+            <form method="post" action="{{ path('host_party_create') }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('host_party_create') }}">
+                <div class="field">
+                    <label for="name">Name der Party</label>
+                    <input class="input" id="name" name="name" maxlength="80" placeholder="z. B. Achims Geburtstag" autofocus>
+                </div>
+                <div class="field">
+                    <label for="votes_per_guest">Stimmen pro Gast</label>
+                    <select class="input" id="votes_per_guest" name="votes_per_guest">
+                        {% for n in 1..6 %}
+                            <option value="{{ n }}" {{ n == 3 ? 'selected' }}>{{ n }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="help">Ein eigener Wunsch kostet eine Stimme. Stimmen kommen zurück, sobald der Titel gelaufen ist.</div>
+                </div>
+                <div class="field">
+                    <label for="fallback_playlist">Fallback-Playlist (optional)</label>
+                    <input class="input" id="fallback_playlist" name="fallback_playlist" placeholder="https://open.spotify.com/playlist/…">
+                    <div class="help">Wird gestartet, wenn nichts läuft und keine Wünsche offen sind. Alternativ einfach selbst eine Playlist in Spotify abspielen.</div>
+                </div>
+                <button class="btn btn-primary" type="submit">Party anlegen</button>
+            </form>
+        </section>
+
+        <div class="stack">
+            <section class="card">
+                <div class="section-label">Bisher</div>
+                <h2>Deine Partys</h2>
+                {% if parties is empty %}
+                    <div class="empty" style="margin-top: 12px;">Noch keine Party. Leg links deine erste an.</div>
+                {% else %}
+                    <ul class="party-list" style="margin-top: 12px;">
+                        {% for party in parties %}
+                            <li>
+                                <a href="{{ path('host_party', {code: party.code}) }}">
+                                    <span>
+                                        <strong>{{ party.name }}</strong><br>
+                                        <span class="small muted">{{ party.createdAt|date('d.m.Y H:i') }} · {{ party.guests|length }} Gäste</span>
+                                    </span>
+                                    <span class="row">
+                                        {% if not party.active %}<span class="badge badge-explicit">beendet</span>{% endif %}
+                                        <span class="code-chip">{{ party.code }}</span>
+                                    </span>
+                                </a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </section>
+
+            <section class="card card-pad-sm">
+                <div class="row row-between">
+                    <span class="small muted">Spotify verbunden als <strong>{{ host.displayName ?? host.spotifyUserId }}</strong></span>
+                    {% if spotify_configured %}
+                        <a class="btn btn-ghost btn-sm" href="{{ path('spotify_login') }}">Konto wechseln</a>
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+    </div>
+    {% endif %}
+{% endblock %}

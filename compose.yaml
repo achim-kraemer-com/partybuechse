@@ -1,0 +1,39 @@
+# Partybüchse – Docker Compose
+#
+#   docker compose up --build -d          # production-like build, http://127.0.0.1:8000
+#   DOCKER_APP_ENV=dev docker compose up --build   # dev build with profiler
+#
+# Secrets and Spotify settings are read from .env.local (same file you use without Docker).
+# Needed there: APP_SECRET, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI,
+# HOST_USERNAME, HOST_PASSWORD (or HOST_PASSWORD_HASH), PUBLIC_BASE_URL.
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        APP_ENV: ${DOCKER_APP_ENV:-prod}
+    image: partybuechse:local
+    container_name: partybuechse
+    restart: unless-stopped
+    ports:
+      - "${DOCKER_PORT:-8000}:80"
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      APP_ENV: ${DOCKER_APP_ENV:-prod}
+      APP_DEBUG: ${DOCKER_APP_DEBUG:-0}
+      # SQLite file lives in the named volume below
+      DATABASE_URL: "sqlite:////var/www/html/var/data/data.db"
+      # behind a reverse proxy in the same Docker network use e.g. 172.16.0.0/12
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+    volumes:
+      - db-data:/var/www/html/var/data
+      # for development you can mount the source and rebuild only on dependency changes:
+      # - ./src:/var/www/html/src
+      # - ./templates:/var/www/html/templates
+      # - ./public:/var/www/html/public
+
+volumes:
+  db-data:

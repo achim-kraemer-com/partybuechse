@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#7c3aed">
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,{{ '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#g)"/><text x="32" y="42" font-family="Lexend, Arial, sans-serif" font-size="28" font-weight="800" fill="#fff" text-anchor="middle">PB</text></svg>'|url_encode }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300..800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ asset('css/app.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+    <div class="glow glow-a" aria-hidden="true"></div>
+    <div class="glow glow-b" aria-hidden="true"></div>
+
+    {% block header %}
+    <header class="topbar">
+        <a class="brand" href="{{ path('home') }}">
+            <span class="monogram">PB</span>
+            <span class="brand-text">
+                <span class="brand-name">{{ app_name }}</span>
+                <span class="brand-sub">{% block brand_sub %}Deine Gäste. Deine Playlist.{% endblock %}</span>
+            </span>
+        </a>
+        <nav class="topnav">{% block nav %}{% endblock %}</nav>
+    </header>
+    {% endblock %}
+
+    <main class="page {% block page_class %}{% endblock %}">
+        {% block flashes %}
+            {% for label, messages in app.flashes %}
+                {% for message in messages %}
+                    <div class="flash flash-{{ label }}" role="status">{{ message }}</div>
+                {% endfor %}
+            {% endfor %}
+        {% endblock %}
+        {% block body %}{% endblock %}
+    </main>
+
+    {% block footer %}
+    <footer class="footer">
+        <span>{{ app_name }} · ein Projekt von <a href="https://achim-kraemer.com" rel="noopener">Achim Krämer</a></span>
+        <span class="footer-note">Musik läuft über das Spotify-Konto des Hosts.</span>
+    </footer>
+    {% endblock %}
+
+    {% block javascripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,45 @@
+# This file is the entry point to configure your own services.
+# Files in the packages/ subdirectory configure your dependencies.
+
+# Put parameters here that don't need to change on each machine where the app is deployed
+# https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
+parameters:
+    app.spotify.client_id: '%env(SPOTIFY_CLIENT_ID)%'
+    app.spotify.client_secret: '%env(SPOTIFY_CLIENT_SECRET)%'
+    app.spotify.redirect_uri: '%env(SPOTIFY_REDIRECT_URI)%'
+    app.public_base_url: '%env(default::PUBLIC_BASE_URL)%'
+    app.host.username: '%env(default::HOST_USERNAME)%'
+    app.host.password: '%env(default::HOST_PASSWORD)%'
+    app.host.password_hash: '%env(default::HOST_PASSWORD_HASH)%'
+
+services:
+    # default configuration for services in *this* file
+    _defaults:
+        autowire: true      # Automatically injects dependencies in your services.
+        autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
+        bind:
+            string $spotifyClientId: '%app.spotify.client_id%'
+            string $spotifyClientSecret: '%app.spotify.client_secret%'
+            string $spotifyRedirectUri: '%app.spotify.redirect_uri%'
+            $publicBaseUrl: '%app.public_base_url%'
+            $hostUsername: '%app.host.username%'
+            $hostPassword: '%app.host.password%'
+            $hostPasswordHash: '%app.host.password_hash%'
+
+    # makes classes in src/ available to be used as services
+    # this creates a service per class whose id is the fully-qualified class name
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/DependencyInjection/'
+            - '../src/Entity/'
+            - '../src/Kernel.php'
+            - '../src/Spotify/TrackInfo.php'
+            - '../src/Spotify/PlaybackState.php'
+            - '../src/Spotify/SpotifyApiException.php'
+            - '../src/Service/SyncResult.php'
+            - '../src/Service/SpotifyUri.php'
+            - '../src/Service/VotingException.php'
+            - '../src/Security/HostUser.php'
+
+    App\Spotify\SpotifyApiInterface: '@App\Spotify\SpotifyClient'

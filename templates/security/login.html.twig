@@ -1,0 +1,43 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Host-Login – {{ app_name }}{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
+
+{% block body %}
+    <section class="hero" style="padding-bottom: 16px;">
+        <span class="eyebrow">Host-Bereich</span>
+        <h1>Anmelden</h1>
+        <p class="lead">Nur für den Host. Gäste brauchen keinen Login, sie scannen einfach den QR-Code.</p>
+    </section>
+
+    <section class="card card-strong" style="max-width: 440px; margin: 0 auto;">
+        {% if not configured %}
+            <div class="flash flash-error">
+                Noch kein Host-Zugang eingerichtet. Setze <code>HOST_USERNAME</code> und <code>HOST_PASSWORD</code>
+                (oder <code>HOST_PASSWORD_HASH</code>) in <code>.env.local</code> bzw. in der Docker-Umgebung.
+            </div>
+        {% endif %}
+
+        {% if error_message %}
+            <div class="flash flash-error">{{ error_message }}</div>
+        {% endif %}
+
+        <form method="post" action="{{ path('app_login') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
+            <div class="field">
+                <label for="username">Benutzername</label>
+                <input class="input" type="text" id="username" name="_username" value="{{ last_username }}" autocomplete="username" required autofocus>
+            </div>
+            <div class="field">
+                <label for="password">Passwort</label>
+                <input class="input" type="password" id="password" name="_password" autocomplete="current-password" required>
+            </div>
+            <div class="field">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" name="_remember_me" checked> Angemeldet bleiben
+                </label>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit">Anmelden</button>
+        </form>
+    </section>
+{% endblock %}

@@ -76,6 +76,31 @@ final class LoginTest extends WebTestCase
         self::assertResponseRedirects('http://localhost/host');
     }
 
+    /**
+     * „Angemeldet bleiben“ ist im Formular vorausgewählt, das Cookie wird also bei jeder
+     * Anmeldung signiert. Genau dort brach die Anmeldung mit 500 ab, nachdem Benutzername und
+     * Passwort bereits geprüft waren, weil Symfony über die Eigenschaft „password“ signiert und
+     * HostUser keine hat. Dieser Test prüft beide Richtungen: Cookie ausstellen und einlösen.
+     */
+    public function testRememberMeCookieKeepsTheHostLoggedInWithoutASession(): void
+    {
+        $this->client->request('GET', '/login');
+        $this->client->submitForm('Anmelden', ['_username' => 'achim', '_password' => 'geheim']);
+        self::assertResponseRedirects('/host');
+
+        $jar = $this->client->getCookieJar();
+        $remember = $jar->get('REMEMBERME');
+        self::assertNotNull($remember, 'Die Anmeldung soll ein Remember-me-Cookie ausstellen.');
+
+        // Session wegwerfen, nur das Remember-me-Cookie behalten.
+        $jar->clear();
+        $jar->set($remember);
+
+        $this->client->request('GET', '/host');
+        self::assertResponseIsSuccessful();
+        self::assertSelectorTextContains('h1', 'Spotify');
+    }
+
     public function testLogoutEndsTheSession(): void
     {
         $this->client->request('GET', '/login');

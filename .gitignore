@@ -17,6 +17,7 @@
 ###> phpunit/phpunit ###
 /phpunit.xml
 .phpunit.result.cache
+/.phpunit.cache/
 ###< phpunit/phpunit ###
 
 ###> symfony/web-profiler-bundle ###
@@ -28,3 +29,6 @@
 
 # one-off helpers and transfer archives
 /_to_delete/
+
+# von `cache:clear` erzeugte Typ-Referenz fuer die Konfiguration (Symfony 7.4)
+/config/reference.php

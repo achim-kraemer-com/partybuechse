@@ -144,6 +144,14 @@ Ein pausierter Player wird nicht angefasst.
 composer test     # = php bin/phpunit
 ```
 
+Ohne lokales PHP geht es auch mit Docker, ganz ohne die Dev-Umgebung einzurichten:
+
+```bash
+docker run --rm -v "$PWD:/app" -w /app php:8.3-cli sh -c 'php vendor/bin/phpunit'
+```
+
+(Beim ersten Mal davor einmal `composer install` im selben Container, siehe Abschnitt 4.)
+
 Die Test-Umgebung braucht keine eigene Env-Datei: Kernel-Klasse, Test-Datenbank und Dummy-Zugangsdaten stehen mit `force="true"` in `phpunit.dist.xml`, damit eine lokale `.env` keine echten Credentials in den Testlauf trägt.
 
 `tests/Service/PlaybackSyncTest.php` deckt die Sync-Entscheidungen mit einem Fake-Spotify ab, `VotingServiceTest.php` die Stimmenregeln, `Controller/LoginTest.php` den Host-Login, `Controller/SmokeTest.php` die Seiten.

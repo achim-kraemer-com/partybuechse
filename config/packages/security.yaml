@@ -33,6 +33,10 @@ security:
                 lifetime: 2592000 # 30 days
                 samesite: lax
                 secure: auto
+                # Symfony signs the cookie over the user's "password" by default. HostUser has no
+                # such property, so the PropertyAccessor threw and every login ended in a 500,
+                # see HostUser::getCredentialsFingerprint().
+                signature_properties: ['credentialsFingerprint']
             login_throttling:
                 max_attempts: 5
                 interval: '15 minutes'

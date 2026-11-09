@@ -40,6 +40,6 @@ final class HostUserProvider implements UserProviderInterface
             throw $e;
         }
 
-        return new HostUser($this->credentials->getUsername());
+        return new HostUser($this->credentials->getUsername(), $this->credentials->fingerprint());
     }
 }

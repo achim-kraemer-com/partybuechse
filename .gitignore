@@ -10,6 +10,10 @@
 /vendor/
 ###< symfony/framework-bundle ###
 
+# Von den Env-Dateien gehört nur .env.dist ins Repository.
+/.env*
+!/.env.dist
+
 ###> phpunit/phpunit ###
 /phpunit.xml
 .phpunit.result.cache

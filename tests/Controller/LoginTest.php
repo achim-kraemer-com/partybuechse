@@ -10,7 +10,7 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 /**
- * Host login with credentials from .env.test (HOST_USERNAME=achim, HOST_PASSWORD=geheim).
+ * Host login with the credentials from phpunit.dist.xml (HOST_USERNAME=achim, HOST_PASSWORD=geheim).
  */
 final class LoginTest extends WebTestCase
 {

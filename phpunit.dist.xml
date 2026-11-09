@@ -15,6 +15,24 @@
         <ini name="error_reporting" value="-1" />
         <server name="APP_ENV" value="test" force="true" />
         <server name="SHELL_VERBOSITY" value="-1" />
+
+        <!-- Test environment. These are set with force="true" so a local .env can
+             never leak real credentials or the real database into the test run.
+             Everything not listed here comes from .env.dist. -->
+        <server name="KERNEL_CLASS" value="App\Kernel" force="true" />
+        <server name="APP_SECRET" value="$ecretf0rt3st" force="true" />
+        <server name="DATABASE_URL" value="sqlite:///%kernel.project_dir%/var/test.db" force="true" />
+
+        <server name="SPOTIFY_CLIENT_ID" value="test-client-id" force="true" />
+        <server name="SPOTIFY_CLIENT_SECRET" value="test-client-secret" force="true" />
+        <server name="SPOTIFY_REDIRECT_URI" value="http://127.0.0.1:8000/spotify/callback" force="true" />
+        <server name="PUBLIC_BASE_URL" value="http://127.0.0.1:8000" force="true" />
+
+        <server name="HOST_USERNAME" value="achim" force="true" />
+        <server name="HOST_PASSWORD" value="geheim" force="true" />
+        <server name="HOST_PASSWORD_HASH" value="" force="true" />
+
+        <server name="TRUSTED_PROXIES" value="" force="true" />
     </php>
 
     <testsuites>

@@ -144,6 +144,8 @@ Ein pausierter Player wird nicht angefasst.
 composer test     # = php bin/phpunit
 ```
 
+Die Test-Umgebung braucht keine eigene Env-Datei: Kernel-Klasse, Test-Datenbank und Dummy-Zugangsdaten stehen mit `force="true"` in `phpunit.dist.xml`, damit eine lokale `.env` keine echten Credentials in den Testlauf trägt.
+
 `tests/Service/PlaybackSyncTest.php` deckt die Sync-Entscheidungen mit einem Fake-Spotify ab, `VotingServiceTest.php` die Stimmenregeln, `Controller/LoginTest.php` den Host-Login, `Controller/SmokeTest.php` die Seiten.
 
 ## 9. Struktur

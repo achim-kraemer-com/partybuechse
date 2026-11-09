@@ -111,6 +111,34 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertSame(SuggestionStatus::Open, $this->second->getStatus());
     }
 
+    /**
+     * Steht der Wunsch schon in Spotifys Warteschlange, unsere Liste weiss es aber nicht – so
+     * geschehen, als addToQueue an einer unlesbaren Antwort scheiterte, obwohl Spotify den Titel
+     * angenommen hatte –, dann muss der Abgleich das nachtragen. Bleibt der Wunsch offen,
+     * belegt er bei jedem Poll erneut die oberste Stelle und die Liste bewegt sich nie weiter.
+     */
+    public function testAWishAlreadyInSpotifysQueueIsRecordedInsteadOfBlockingTheList(): void
+    {
+        $this->spotify->queue = [$this->top->getSpotifyUri()];
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 185_000, isPlaying: true);
+
+        $result = $this->sync->sync($this->party);
+
+        self::assertSame(Party::SYNC_OK, $result->status);
+        self::assertSame(SuggestionStatus::Queued, $this->top->getStatus());
+        self::assertNotContains(['queue', $this->top->getSpotifyUri()], $this->spotify->calls, 'Nicht ein zweites Mal einreihen.');
+
+        // Ist der Wunsch gelaufen, muss der naechste an die Reihe kommen.
+        $this->spotify->queue = [];
+        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 1_000, isPlaying: true);
+        $this->sync->sync($this->party);
+        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
+
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 185_000, isPlaying: true);
+        $this->sync->sync($this->party);
+        self::assertSame(SuggestionStatus::Queued, $this->second->getStatus());
+    }
+
     public function testQueuedWishBecomesPlayedWhenItComesOn(): void
     {
         $this->top->markQueued($this->clock->now());

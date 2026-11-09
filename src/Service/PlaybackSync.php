@@ -231,12 +231,18 @@ class PlaybackSync
                 // Warteschlange – bei 4 Sekunden Pollabstand fünfmal pro Fenster.
                 $queueUris = $this->safeQueueUris($party);
                 if (null !== $queueUris && \in_array($top->getSpotifyUri(), $queueUris, true)) {
-                    $this->logger->notice('Wish is already in Spotify\'s queue but still open in our list', [
+                    // Spotify hat den Titel schon, nur unsere Liste weiss es nicht. Nachtragen,
+                    // nicht bloss abbrechen: sonst bleibt der Wunsch oben in der Rangliste
+                    // stehen, blockiert dort bei jedem Poll erneut diese Stelle, und der
+                    // naechste Wunsch wird nie uebergeben – die Liste bewegt sich nicht mehr.
+                    $top->markQueued($now);
+                    $this->entityManager->flush();
+                    $this->logger->notice('Wish was already in Spotify\'s queue, recorded as queued', [
                         'party' => $party->getCode(),
                         'wish' => $top->getSpotifyUri(),
                     ]);
 
-                    return [];
+                    return [sprintf('War schon bei Spotify: %s', $this->label($top))];
                 }
 
                 return $this->handOver(

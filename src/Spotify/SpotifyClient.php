@@ -97,7 +97,7 @@ class SpotifyClient implements SpotifyApiInterface
         if (null !== $deviceId) {
             $query['device_id'] = $deviceId;
         }
-        $this->call($host, 'POST', '/me/player/queue', ['query' => $query]);
+        $this->command($host, 'POST', '/me/player/queue', ['query' => $query]);
     }
 
     public function startPlayback(Host $host, array $uris = [], ?string $contextUri = null, ?string $deviceId = null): void
@@ -115,7 +115,7 @@ class SpotifyClient implements SpotifyApiInterface
         if ([] !== $body) {
             $options['json'] = $body;
         }
-        $this->call($host, 'PUT', '/me/player/play', $options);
+        $this->command($host, 'PUT', '/me/player/play', $options);
     }
 
     public function skipToNext(Host $host, ?string $deviceId = null): void
@@ -124,7 +124,7 @@ class SpotifyClient implements SpotifyApiInterface
         if (null !== $deviceId) {
             $options['query'] = ['device_id' => $deviceId];
         }
-        $this->call($host, 'POST', '/me/player/next', $options);
+        $this->command($host, 'POST', '/me/player/next', $options);
     }
 
     public function getQueueUris(Host $host): array
@@ -160,18 +160,15 @@ class SpotifyClient implements SpotifyApiInterface
     }
 
     /**
-     * Performs an authenticated request and decodes the JSON body (empty array for 204/empty bodies).
+     * Performs an authenticated request; a 401 triggers one token refresh and a retry.
      *
      * @param array<string, mixed> $options
      *
-     * @return array<string, mixed>
-     *
      * @throws SpotifyApiException
      */
-    private function call(Host $host, string $method, string $path, array $options = [], bool $retry = true): array
+    private function send(Host $host, string $method, string $path, array $options = [], bool $retry = true): ResponseInterface
     {
-        $token = $this->tokenProvider->getAccessToken($host);
-        $options['auth_bearer'] = $token;
+        $options['auth_bearer'] = $this->tokenProvider->getAccessToken($host);
 
         $response = $this->httpClient->request($method, self::API_BASE.$path, $options);
         $status = $response->getStatusCode();
@@ -180,12 +177,47 @@ class SpotifyClient implements SpotifyApiInterface
             $this->logger->notice('Spotify returned 401, refreshing token once', ['path' => $path]);
             $this->tokenProvider->getAccessToken($host, true);
 
-            return $this->call($host, $method, $path, $options, false);
+            return $this->send($host, $method, $path, $options, false);
         }
 
         if ($status >= 400) {
             throw $this->toException($response, $status);
         }
+
+        return $response;
+    }
+
+    /**
+     * Tells the player to do something. Only the status code is read.
+     *
+     * These endpoints carry no payload we need, and what they actually send back varies:
+     * /me/player/queue answered 200 with a body that is not JSON, which used to abort the whole
+     * hand-over although Spotify had accepted the track - the wish went back into the ranking,
+     * stayed there, and the list stopped moving. A write either worked or it did not; that is
+     * what the status code says.
+     *
+     * @param array<string, mixed> $options
+     *
+     * @throws SpotifyApiException
+     */
+    private function command(Host $host, string $method, string $path, array $options = []): void
+    {
+        $this->send($host, $method, $path, $options);
+    }
+
+    /**
+     * Performs a request and decodes the JSON body (empty array for 204/empty bodies).
+     *
+     * @param array<string, mixed> $options
+     *
+     * @return array<string, mixed>
+     *
+     * @throws SpotifyApiException
+     */
+    private function call(Host $host, string $method, string $path, array $options = []): array
+    {
+        $response = $this->send($host, $method, $path, $options);
+        $status = $response->getStatusCode();
 
         if (204 === $status) {
             return [];
@@ -199,10 +231,23 @@ class SpotifyClient implements SpotifyApiInterface
         try {
             $decoded = json_decode($content, true, 512, \JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
-            throw new SpotifyApiException('Unreadable response from Spotify', $status, null, $e);
+            // Mit dem Anfang des Koerpers, sonst steht im Log nur, dass etwas unlesbar war.
+            throw new SpotifyApiException(
+                sprintf('Unreadable response from Spotify: %s', $this->excerpt($content)),
+                $status,
+                null,
+                $e,
+            );
         }
 
         return \is_array($decoded) ? $decoded : [];
+    }
+
+    private function excerpt(string $content): string
+    {
+        $oneLine = trim((string) preg_replace('~\s+~u', ' ', $content));
+
+        return mb_strimwidth($oneLine, 0, 120, '…');
     }
 
     private function toException(ResponseInterface $response, int $status): SpotifyApiException

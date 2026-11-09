@@ -1,4 +1,14 @@
 security:
+    # Only for `bin/console security:hash-password`. The login itself does not go
+    # through the hasher factory: HostCredentials checks HOST_PASSWORD_HASH with
+    # password_verify(). bcrypt is pinned because password_verify() only knows
+    # argon2id when PHP was built with libargon2, which is not guaranteed on the
+    # hosts this runs on. The cost matches the example hash in the README.
+    password_hashers:
+        App\Security\HostUser:
+            algorithm: bcrypt
+            cost: 13
+
     # One host account, configured via HOST_USERNAME + HOST_PASSWORD (or HOST_PASSWORD_HASH), see .env
     providers:
         host_user:

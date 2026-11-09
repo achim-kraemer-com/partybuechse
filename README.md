@@ -238,13 +238,18 @@ Dokumentwurzel. Sie überlebt den Deploy, weil der Hook kein `git clean` läuft 
    ```bash
    cd /var/www/vhosts/achim-kraemer.com/partybuechse.achim-kraemer.com
 
-   /opt/plesk/php/8.5/bin/php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'   # APP_SECRET
+   # APP_SECRET erzeugen
+   /opt/plesk/php/8.5/bin/php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'
+
+   # Host-Passwort hashen – fragt das Passwort verdeckt ab, es landet weder in
+   # der Shell-History noch in der Prozessliste
+   /opt/plesk/php/8.5/bin/php bin/console security:hash-password
 
    cat > .env.local <<'ENV'
    APP_ENV=prod
    APP_SECRET=<Ausgabe von oben>
    HOST_USERNAME=achim
-   HOST_PASSWORD=<Passwort für /login>
+   HOST_PASSWORD_HASH='<Hash von oben, einfache Anführungszeichen wegen der $-Zeichen>'
    SPOTIFY_CLIENT_ID=<Spotify Developer Dashboard>
    SPOTIFY_CLIENT_SECRET=<Spotify Developer Dashboard>
    SPOTIFY_REDIRECT_URI=https://partybuechse.achim-kraemer.com/spotify/callback
@@ -252,6 +257,11 @@ Dokumentwurzel. Sie überlebt den Deploy, weil der Hook kein `git clean` läuft 
    ENV
    chmod 600 .env.local
    ```
+
+   Statt `HOST_PASSWORD_HASH` tut es auch `HOST_PASSWORD` im Klartext; steht
+   beides, gewinnt der Hash. Beide Werte liest Symfony bei jedem Request neu –
+   ein erneutes Deployment ist nach einer Änderung an `.env.local` nicht nötig,
+   solange keine `.env.local.php` existiert.
 
    `deploy.sh` bricht ab, solange `.env.local` fehlt oder darin noch der
    `APP_SECRET`-Platzhalter aus `.env.dist` steht – der Wert ist über das

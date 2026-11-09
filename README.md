@@ -125,7 +125,12 @@ Die Seite ist eine PWA: In Chrome erscheint in der Adressleiste ein **Installier
 geht es über *Teilen* → *Zum Home-Bildschirm*. Die App startet dann ohne Adressleiste in
 einem eigenen Fenster, mit eigenem Icon im Dock bzw. auf dem Home-Bildschirm.
 
-Dazu gehören `public/manifest.webmanifest`, die Icons in `public/icons/` und
+Die Icons liegen in `public/app-icons/` und **nicht** in `public/icons/`: Apache aliast
+`/icons/` auf sein eigenes Verzeichnis mit den Autoindex-Symbolen, der Alias verdeckt ein
+gleichnamiges Verzeichnis in der Dokumentwurzel vollständig (`/icons/compressed.gif`
+antwortet auf diesem Server mit 200).
+
+Dazu gehören `public/manifest.webmanifest`, die Icons in `public/app-icons/` und
 `public/sw.js`. Der Service Worker speichert bewusst fast nichts zwischen – er arbeitet
 "erst das Netz, dann der Zwischenspeicher" – und dient nur zwei Zwecken: Chrome bietet das
 Installieren ohne ihn nicht an, und ohne Netz erscheint `public/offline.html` statt der

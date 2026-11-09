@@ -13,12 +13,12 @@
  * VERSION hochzählen, wenn sich eine der Dateien in SHELL ändert.
  */
 
-const VERSION = 'partybuechse-shell-v1';
+const VERSION = 'partybuechse-shell-v2';
 const OFFLINE_URL = '/offline.html';
 const SHELL = [
     OFFLINE_URL,
     '/css/app.css',
-    '/icons/icon-192.png',
+    '/app-icons/icon-192.png',
 ];
 
 self.addEventListener('install', (event) => {

@@ -42,7 +42,7 @@ when@prod:
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: info
                 max_files: 7
-                channels: ["!event", "!deprecation"]
+                channels: ["!event", "!deprecation", "!request"] # Routen-Treffer bei jedem Poll waeren nur Rauschen
             main:
                 type: fingers_crossed
                 action_level: error

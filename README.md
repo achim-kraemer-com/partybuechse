@@ -198,6 +198,20 @@ beide auseinander, baute 8.3 den Container nach `var/cache/prod` und 8.5 läse
 ihn wieder aus. Aus demselben Grund wird `composer` über die
 Plesk-`composer.phar` aufgerufen.
 
+`composer.lock` und `symfony.lock` sind versioniert, und das ist nicht nur
+Hygiene: ohne sie löst `composer install` auf dem Server eine vollständige
+Auflösung aus, und Symfony Flex rollt dabei **alle Rezepte neu aus**. Beim
+ersten Deploy hat das eine `.env` mit `DATABASE_URL="postgresql://…"` angelegt,
+die `.env.dist` verdeckt hat – die Anwendung lief danach gegen einen
+PostgreSQL-Server, den es hier nicht gibt. Mit den beiden Lock-Dateien
+installiert der Deploy feste Fassungen und rührt keine Rezepte an.
+
+`config.platform.php` in `composer.json` steht auf `8.2.0`, also auf dem
+Mindestwert, den das Projekt selbst verlangt. Ohne diese Angabe löst composer
+gegen die PHP-Fassung der Maschine auf, auf der es läuft – auf dem Server ist
+das 8.5, und dabei entsteht ein Lock, der sich im Docker-Image (8.3) nicht
+installieren lässt. Mit der Angabe passt derselbe Lock auf 8.2 bis 8.5.
+
 Die Datenbank ist eine SQLite-Datei in `var/` und liegt damit außerhalb der
 Dokumentwurzel. Sie überlebt den Deploy, weil der Hook kein `git clean` läuft –
 `.env.local`, `var/` und `vendor/` sind nicht getrackt.

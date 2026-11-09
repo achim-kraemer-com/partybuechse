@@ -71,10 +71,11 @@ done
 echo "→ Abhängigkeiten installieren"
 "$PHP" "$COMPOSER" install --no-dev --optimize-autoloader --no-interaction --no-progress
 
-# Die SQLite-Datei liegt in var/ und damit außerhalb der Dokumentwurzel.
-# Beim ersten Deploy existiert sie noch nicht.
-echo "→ Datenbank anlegen, falls nötig"
-"$PHP" bin/console doctrine:database:create --if-not-exists --no-interaction
+# Die SQLite-Datei liegt in var/ und damit außerhalb der Dokumentwurzel. Beim
+# ersten Deploy existiert sie noch nicht; PDO legt sie beim Verbinden an,
+# sobald das Verzeichnis da ist. Kein "doctrine:database:create": DBAL 4 kann
+# getListDatabasesSQL für SQLite nicht und bricht mit NotSupported ab.
+mkdir -p var
 
 echo "→ Datenbank migrieren"
 "$PHP" bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration

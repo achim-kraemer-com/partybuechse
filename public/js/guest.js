@@ -55,7 +55,7 @@
 
     function trackRow(item, opts) {
         const classes = ['track'];
-        if (item.status === 'queued') classes.push('is-queued');
+        if (item.status === 'playing') classes.push('is-playing');
         if (item.mine) classes.push('is-mine');
         if (item.position && item.position <= 3) classes.push('top-' + item.position);
         if (!item.position) classes.push('no-rank');
@@ -66,7 +66,7 @@
 
         const title = PB.h('div', { class: 'track-title', title: item.title },
             item.title, ' ',
-            item.status === 'queued' ? PB.h('span', { class: 'badge badge-queued' }, 'läuft gleich') : null);
+            item.status === 'playing' ? PB.h('span', { class: 'badge badge-playing' }, 'läuft gerade') : null);
 
         let action;
         if (opts.played) {

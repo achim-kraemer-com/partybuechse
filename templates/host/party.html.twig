@@ -40,7 +40,7 @@
                     <div class="actions-inline">
                         <form method="post" action="{{ path('host_party_skip', {code: party.code}) }}">
                             <input type="hidden" name="_token" value="{{ csrf_token('host_party_action') }}">
-                            <button class="btn btn-ghost btn-sm" type="submit" title="Aktuellen Titel überspringen">
+                            <button class="btn btn-ghost btn-sm" type="submit" title="Laufenden Titel abhaken und den nächsten Wunsch starten">
                                 <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5.5v13l9-6.5-9-6.5ZM17 5h2v14h-2z"/></svg>
                                 Überspringen
                             </button>
@@ -103,7 +103,7 @@
                     <div class="field">
                         <label for="fallback_playlist">Fallback-Playlist</label>
                         <input class="input" id="fallback_playlist" name="fallback_playlist" value="{{ party.fallbackPlaylistUri ?? '' }}" placeholder="https://open.spotify.com/playlist/…">
-                        <div class="help">Läuft, wenn nichts spielt und keine Wünsche offen sind.</div>
+                        <div class="help">Übernimmt, sobald keine Wünsche offen sind – auch am Ende des letzten Wunsches.</div>
                     </div>
                     <button class="btn btn-primary btn-sm" type="submit">Speichern</button>
                 </form>

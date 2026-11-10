@@ -60,8 +60,9 @@ class Suggestion
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
     private \DateTimeImmutable $createdAt;
 
+    /** When the Partybüchse (or the host) started this track. */
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
-    private ?\DateTimeImmutable $queuedAt = null;
+    private ?\DateTimeImmutable $startedAt = null;
 
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $playedAt = null;
@@ -165,19 +166,25 @@ class Suggestion
         return SuggestionStatus::Open === $this->status;
     }
 
-    public function markQueued(\DateTimeImmutable $at): self
+    public function isPlaying(): bool
     {
-        $this->status = SuggestionStatus::Queued;
-        $this->queuedAt = $at;
+        return SuggestionStatus::Playing === $this->status;
+    }
+
+    /** This track is on the speakers right now. */
+    public function markPlaying(\DateTimeImmutable $at): self
+    {
+        $this->status = SuggestionStatus::Playing;
+        $this->startedAt = $at;
 
         return $this;
     }
 
-    /** Puts a stale "queued" wish back into the ranking (e.g. the host switched playlists). */
+    /** Puts a wish back into the ranking (Spotify refused to start it). */
     public function reopen(): self
     {
         $this->status = SuggestionStatus::Open;
-        $this->queuedAt = null;
+        $this->startedAt = null;
 
         return $this;
     }
@@ -202,9 +209,9 @@ class Suggestion
         return $this->createdAt;
     }
 
-    public function getQueuedAt(): ?\DateTimeImmutable
+    public function getStartedAt(): ?\DateTimeImmutable
     {
-        return $this->queuedAt;
+        return $this->startedAt;
     }
 
     public function getPlayedAt(): ?\DateTimeImmutable

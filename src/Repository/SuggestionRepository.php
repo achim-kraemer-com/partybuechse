@@ -21,7 +21,7 @@ class SuggestionRepository extends ServiceEntityRepository
     }
 
     /**
-     * The live ranking: open and queued wishes, most votes first, older wishes win ties.
+     * The live ranking: the running track and the open wishes, most votes first, older wishes win ties.
      *
      * @return Suggestion[]
      */
@@ -31,8 +31,8 @@ class SuggestionRepository extends ServiceEntityRepository
             ->andWhere('s.party = :party')
             ->andWhere('s.status IN (:statuses)')
             ->setParameter('party', $party)
-            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Queued->value])
-            ->orderBy('s.status', 'DESC') // "queued" sorts before "open"
+            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Playing->value])
+            ->orderBy('s.status', 'DESC') // "playing" sorts before "open"
             ->addOrderBy('s.voteCount', 'DESC')
             ->addOrderBy('s.createdAt', 'ASC')
             ->addOrderBy('s.id', 'ASC')
@@ -40,7 +40,7 @@ class SuggestionRepository extends ServiceEntityRepository
             ->getResult();
     }
 
-    /** The wish that should be handed to Spotify next, or null if the ranking is empty. */
+    /** The wish the Partybüchse plays next, or null if nothing is wished for. */
     public function findTopOpen(Party $party): ?Suggestion
     {
         return $this->createQueryBuilder('s')
@@ -56,39 +56,24 @@ class SuggestionRepository extends ServiceEntityRepository
             ->getOneOrNullResult();
     }
 
-    /** @return Suggestion[] */
-    public function findQueued(Party $party): array
-    {
-        return $this->findBy(['party' => $party, 'status' => SuggestionStatus::Queued], ['queuedAt' => 'ASC']);
-    }
-
     /**
-     * A wish this host handed to Spotify in a *different* party and that never played.
+     * The track this party started, i.e. what should be on the speakers.
      *
-     * Spotify's queue belongs to the account, not to the party, and the API has no way to take
-     * a track back out of it. A wish that was handed over shortly before its party ended
-     * therefore comes on during the next party: the guests hear a song nobody there wished for.
-     * "queued" is exactly the record of "handed over, not played yet".
+     * There is at most one; findPlayingAll() exists only to tidy up should a crash ever leave
+     * two behind.
      */
-    public function findQueuedInAnotherParty(Party $party, string $uri): ?Suggestion
+    public function findPlaying(Party $party): ?Suggestion
     {
-        return $this->createQueryBuilder('s')
-            ->join('s.party', 'p')
-            ->andWhere('p.host = :host')
-            ->andWhere('p != :party')
-            ->andWhere('s.spotifyUri = :uri')
-            ->andWhere('s.status = :queued')
-            ->setParameter('host', $party->getHost())
-            ->setParameter('party', $party)
-            ->setParameter('uri', $uri)
-            ->setParameter('queued', SuggestionStatus::Queued->value)
-            ->orderBy('s.queuedAt', 'ASC')
-            ->setMaxResults(1)
-            ->getQuery()
-            ->getOneOrNullResult();
+        return $this->findPlayingAll($party)[0] ?? null;
     }
 
-    /** An open or queued wish for the same track, so duplicates turn into votes. */
+    /** @return Suggestion[] */
+    public function findPlayingAll(Party $party): array
+    {
+        return $this->findBy(['party' => $party, 'status' => SuggestionStatus::Playing], ['startedAt' => 'ASC']);
+    }
+
+    /** An open or playing wish for the same track, so duplicates turn into votes. */
     public function findPendingByUri(Party $party, string $uri): ?Suggestion
     {
         return $this->createQueryBuilder('s')
@@ -97,7 +82,7 @@ class SuggestionRepository extends ServiceEntityRepository
             ->andWhere('s.status IN (:statuses)')
             ->setParameter('party', $party)
             ->setParameter('uri', $uri)
-            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Queued->value])
+            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Playing->value])
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();
@@ -118,7 +103,7 @@ class SuggestionRepository extends ServiceEntityRepository
         );
     }
 
-    /** @return string[] Spotify URIs that are currently open or queued. */
+    /** @return string[] Spotify URIs that are currently open or playing. */
     public function findPendingUris(Party $party): array
     {
         $rows = $this->createQueryBuilder('s')
@@ -126,7 +111,7 @@ class SuggestionRepository extends ServiceEntityRepository
             ->andWhere('s.party = :party')
             ->andWhere('s.status IN (:statuses)')
             ->setParameter('party', $party)
-            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Queued->value])
+            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Playing->value])
             ->getQuery()
             ->getScalarResult();
 

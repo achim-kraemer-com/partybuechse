@@ -91,15 +91,6 @@ class SpotifyClient implements SpotifyApiInterface
         return PlaybackState::fromApi($data, $this->clock->now());
     }
 
-    public function addToQueue(Host $host, string $uri, ?string $deviceId = null): void
-    {
-        $query = ['uri' => $uri];
-        if (null !== $deviceId) {
-            $query['device_id'] = $deviceId;
-        }
-        $this->command($host, 'POST', '/me/player/queue', ['query' => $query]);
-    }
-
     public function startPlayback(Host $host, array $uris = [], ?string $contextUri = null, ?string $deviceId = null): void
     {
         $options = [];
@@ -125,22 +116,6 @@ class SpotifyClient implements SpotifyApiInterface
             $options['query'] = ['device_id' => $deviceId];
         }
         $this->command($host, 'POST', '/me/player/next', $options);
-    }
-
-    public function getQueueUris(Host $host): array
-    {
-        $data = $this->call($host, 'GET', '/me/player/queue');
-        $uris = [];
-        if (!empty($data['currently_playing']['uri'])) {
-            $uris[] = (string) $data['currently_playing']['uri'];
-        }
-        foreach ($data['queue'] ?? [] as $item) {
-            if (!empty($item['uri'])) {
-                $uris[] = (string) $item['uri'];
-            }
-        }
-
-        return $uris;
     }
 
     public function getDevices(Host $host): array
@@ -190,8 +165,8 @@ class SpotifyClient implements SpotifyApiInterface
     /**
      * Tells the player to do something. Only the status code is read.
      *
-     * These endpoints carry no payload we need, and what they actually send back varies:
-     * /me/player/queue answered 200 with a body that is not JSON, which used to abort the whole
+     * These endpoints carry no payload we need, and what they actually send back varies: a
+     * player command answered 200 with a body that is not JSON, which used to abort the whole
      * hand-over although Spotify had accepted the track - the wish went back into the ranking,
      * stayed there, and the list stopped moving. A write either worked or it did not; that is
      * what the status code says.

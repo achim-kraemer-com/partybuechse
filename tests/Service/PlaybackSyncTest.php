@@ -23,6 +23,9 @@ use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\InMemoryStore;
 
+/**
+ * Der DJ-Modus: Die Partybüchse startet jeden Titel selbst und reiht nichts bei Spotify ein.
+ */
 final class PlaybackSyncTest extends KernelTestCase
 {
     use SchemaTrait;
@@ -50,7 +53,7 @@ final class PlaybackSyncTest extends KernelTestCase
         $this->parties = $container->get(PartyRepository::class);
         $this->voting = $container->get(VotingService::class);
         $this->spotify = new FakeSpotifyApi();
-        $this->clock = new MockClock('2026-11-09 21:00:00');
+        $this->clock = new MockClock('2026-11-10 21:00:00');
 
         $this->sync = new PlaybackSync(
             $this->spotify,
@@ -73,7 +76,7 @@ final class PlaybackSyncTest extends KernelTestCase
         $this->second = $this->voting->suggest($ben, Fixtures::track('2', 'Second Wish'));
     }
 
-    public function testNoActiveDeviceIsReportedAndNothingIsQueued(): void
+    public function testNoActiveDeviceIsReportedAndNothingIsStarted(): void
     {
         $this->spotify->noActiveDevice = true;
 
@@ -82,14 +85,14 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertSame(Party::SYNC_NO_DEVICE, $result->status);
         self::assertSame(Party::SYNC_NO_DEVICE, $this->party->getSyncStatus());
         self::assertNull($this->party->getNowPlaying());
-        self::assertNotContains('queue', $this->spotify->callNames());
+        self::assertNotContains('play', $this->spotify->callNames());
         self::assertSame(SuggestionStatus::Open, $this->top->getStatus());
     }
 
     /**
      * Ein Spotify-Konto hat einen Player, also steuert ihn genau eine Party: die zuletzt
-     * gestartete. Liefen zwei, buchten beide den laufenden Titel als ihren eigenen und legten
-     * beide Wuensche in dieselbe Warteschlange.
+     * gestartete. Liefen zwei, buchten beide den laufenden Titel als ihren eigenen und beide
+     * schickten ihre Wünsche an denselben Player.
      */
     public function testOnlyTheNewestActivePartyOfAHostSteersSpotify(): void
     {
@@ -114,61 +117,6 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertSame(Party::SYNC_OK, $this->sync->sync($newer)->status);
     }
 
-    /**
-     * Spotifys Warteschlange gehört dem Konto, nicht der Party. Ein Wunsch, der kurz vor dem
-     * Ende seiner Party übergeben wurde, läuft deshalb mitten in der nächsten an – genau das
-     * ist passiert: in Party F65DP lief „Dirty Diana“ aus der längst beendeten D99VH.
-     */
-    public function testATrackLeftInSpotifysQueueByAnotherPartyIsSkipped(): void
-    {
-        $leftover = $this->leftoverOfAnEndedParty();
-        $this->spotify->state = $this->playing($leftover->toTrackInfo(), progressMs: 3_000, isPlaying: true);
-
-        $result = $this->sync->sync($this->party);
-
-        self::assertContains(['next'], $this->spotify->calls);
-        self::assertSame(SuggestionStatus::Removed, $leftover->getStatus());
-        self::assertStringContainsString('Übersprungen', (string) $result->message);
-        self::assertStringContainsString('Alte Party', (string) $result->message);
-
-        // Nur einmal: beim nächsten Durchgang ist der Titel abgehakt.
-        $this->spotify->calls = [];
-        $this->sync->sync($this->party);
-        self::assertNotContains(['next'], $this->spotify->calls);
-    }
-
-    public function testATrackThisPartyWishesItselfIsNeverSkipped(): void
-    {
-        $leftover = $this->leftoverOfAnEndedParty();
-
-        // Dieselbe Nummer steht auch auf dieser Liste.
-        $mine = $this->voting->suggest(
-            Fixtures::guest($this->em, $this->party, $this->clock->now(), str_repeat('c', 48), 'Clara'),
-            $leftover->toTrackInfo(),
-        );
-        $this->spotify->state = $this->playing($leftover->toTrackInfo(), progressMs: 3_000, isPlaying: true);
-
-        $this->sync->sync($this->party);
-
-        self::assertNotContains(['next'], $this->spotify->calls);
-        self::assertSame(SuggestionStatus::Queued, $leftover->getStatus());
-        self::assertSame(SuggestionStatus::Played, $mine->getStatus(), 'Für diese Party zählt er als gelaufen.');
-    }
-
-    /** Ein Wunsch, den eine ältere, beendete Party desselben Hosts an Spotify übergeben hat. */
-    private function leftoverOfAnEndedParty(): Suggestion
-    {
-        $earlier = $this->clock->now()->modify('-1 hour');
-        $old = Fixtures::party($this->em, $this->party->getHost(), $earlier, code: 'OLD99', name: 'Alte Party');
-        $guest = Fixtures::guest($this->em, $old, $earlier, str_repeat('o', 48), 'Olli');
-        $leftover = $this->voting->suggest($guest, Fixtures::track('x', 'Fremdes Lied'));
-        $leftover->markQueued($earlier);
-        $old->end($earlier);
-        $this->em->flush();
-
-        return $leftover;
-    }
-
     public function testNothingHappensWhileTheCurrentTrackHasPlentyOfTimeLeft(): void
     {
         $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 10_000, isPlaying: true);
@@ -179,67 +127,49 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertSame([], $result->actions);
         self::assertSame('Host Song', $this->party->getNowPlaying()['track']['title']);
         self::assertSame(SuggestionStatus::Open, $this->top->getStatus());
-    }
-
-    public function testTopWishIsQueuedShortlyBeforeTheTrackEnds(): void
-    {
-        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 185_000, isPlaying: true);
-
-        $result = $this->sync->sync($this->party);
-
-        self::assertSame(Party::SYNC_OK, $result->status);
-        self::assertContains(['queue', $this->top->getSpotifyUri()], $this->spotify->calls);
-        self::assertSame(SuggestionStatus::Queued, $this->top->getStatus());
-        self::assertSame(SuggestionStatus::Open, $this->second->getStatus());
-
-        // a second run within the same window must not queue the next wish as well
-        $this->sync->sync($this->party);
-        self::assertSame(1, \count(array_filter($this->spotify->calls, static fn (array $c) => 'queue' === $c[0])));
-        self::assertSame(SuggestionStatus::Open, $this->second->getStatus());
+        self::assertNotContains('play', $this->spotify->callNames());
     }
 
     /**
-     * Steht der Wunsch schon in Spotifys Warteschlange, unsere Liste weiss es aber nicht – so
-     * geschehen, als addToQueue an einer unlesbaren Antwort scheiterte, obwohl Spotify den Titel
-     * angenommen hatte –, dann muss der Abgleich das nachtragen. Bleibt der Wunsch offen,
-     * belegt er bei jedem Poll erneut die oberste Stelle und die Liste bewegt sich nie weiter.
+     * Der Kern des DJ-Modus: Kurz vor dem Ende startet die Büchse den Top-Wunsch selbst. Nichts
+     * wandert in Spotifys Warteschlange, also kann sich auch nichts dazwischenschieben.
      */
-    public function testAWishAlreadyInSpotifysQueueIsRecordedInsteadOfBlockingTheList(): void
+    public function testTopWishIsStartedShortlyBeforeTheTrackEnds(): void
     {
-        $this->spotify->queue = [$this->top->getSpotifyUri()];
-        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 185_000, isPlaying: true);
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 198_000, isPlaying: true);
 
         $result = $this->sync->sync($this->party);
 
         self::assertSame(Party::SYNC_OK, $result->status);
-        self::assertSame(SuggestionStatus::Queued, $this->top->getStatus());
-        self::assertNotContains(['queue', $this->top->getSpotifyUri()], $this->spotify->calls, 'Nicht ein zweites Mal einreihen.');
-
-        // Ist der Wunsch gelaufen, muss der naechste an die Reihe kommen.
-        $this->spotify->queue = [];
-        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 1_000, isPlaying: true);
-        $this->sync->sync($this->party);
-        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
-
-        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 185_000, isPlaying: true);
-        $this->sync->sync($this->party);
-        self::assertSame(SuggestionStatus::Queued, $this->second->getStatus());
+        self::assertContains(['play', [$this->top->getSpotifyUri()], null], $this->spotify->calls);
+        self::assertSame(SuggestionStatus::Playing, $this->top->getStatus());
+        self::assertEquals($this->clock->now(), $this->top->getStartedAt());
+        self::assertSame(SuggestionStatus::Open, $this->second->getStatus());
+        self::assertStringContainsString('Top Wish', (string) $result->message);
     }
 
-    public function testQueuedWishBecomesPlayedWhenItComesOn(): void
+    /** Die Rangliste entscheidet im Moment des Wechsels, nicht Minuten vorher. */
+    public function testTheRankingDecidesAtTheMomentOfTheSwitch(): void
     {
-        $this->top->markQueued($this->clock->now());
-        $this->em->flush();
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 10_000, isPlaying: true);
+        $this->sync->sync($this->party);
+        self::assertNotContains('play', $this->spotify->callNames(), 'Noch ist nichts entschieden.');
 
-        $this->clock->sleep(30);
-        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 2_000, isPlaying: true);
+        // Kurz vor dem Wechsel zieht ein anderer Wunsch vorbei.
+        $clara = Fixtures::guest($this->em, $this->party, $this->clock->now(), str_repeat('c', 48), 'Clara');
+        $this->voting->vote($clara, $this->second);
+        $this->voting->vote(
+            Fixtures::guest($this->em, $this->party, $this->clock->now(), str_repeat('d', 48), 'Dennis'),
+            $this->second,
+        );
 
-        $result = $this->sync->sync($this->party);
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 199_000, isPlaying: true);
+        $this->sync->sync($this->party);
 
-        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
-        self::assertSame('Anna', $this->party->getNowPlaying()['wishedBy']);
-        self::assertSame([], array_filter($this->spotify->calls, static fn (array $c) => 'queue' === $c[0]));
-        self::assertStringContainsString('Top Wish', (string) $result->message);
+        self::assertContains(['play', [$this->second->getSpotifyUri()], null], $this->spotify->calls);
+        self::assertSame(SuggestionStatus::Playing, $this->second->getStatus());
+        self::assertSame(SuggestionStatus::Open, $this->top->getStatus(), 'Der überholte Wunsch bleibt in der Liste.');
     }
 
     public function testIdlePlayerStartsTheTopWishImmediately(): void
@@ -249,7 +179,7 @@ final class PlaybackSyncTest extends KernelTestCase
         $this->sync->sync($this->party);
 
         self::assertContains(['play', [$this->top->getSpotifyUri()], null], $this->spotify->calls);
-        self::assertSame(SuggestionStatus::Queued, $this->top->getStatus());
+        self::assertSame(SuggestionStatus::Playing, $this->top->getStatus());
     }
 
     public function testPausedPlayerIsLeftAlone(): void
@@ -259,60 +189,70 @@ final class PlaybackSyncTest extends KernelTestCase
         $this->sync->sync($this->party);
 
         self::assertNotContains('play', $this->spotify->callNames());
-        self::assertNotContains('queue', $this->spotify->callNames());
         self::assertSame(SuggestionStatus::Open, $this->top->getStatus());
     }
 
-    public function testWishThatVanishedFromSpotifysQueueIsConsideredConsumed(): void
+    /** Der laufende Wunsch bleibt laufen; erst wenn er nicht mehr läuft, ist er durch. */
+    public function testTheRunningWishIsSettledWhenThePlayerHasMovedOn(): void
     {
-        $this->top->markQueued($this->clock->now());
+        $this->top->markPlaying($this->clock->now());
         $this->em->flush();
 
-        // inside the grace period: still queued
-        $this->clock->sleep(30);
-        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 30_000, isPlaying: true);
+        // Läuft noch: nichts passiert.
+        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 5_000, isPlaying: true);
         $this->sync->sync($this->party);
-        self::assertSame(SuggestionStatus::Queued, $this->top->getStatus());
+        self::assertSame(SuggestionStatus::Playing, $this->top->getStatus());
+        self::assertSame('Anna', $this->party->getNowPlaying()['wishedBy']);
+        self::assertNotContains('play', $this->spotify->callNames());
 
-        // after the grace period and not in the queue anymore: consumed, next wish may follow
-        $this->clock->sleep(PlaybackSync::QUEUE_GRACE_SECONDS);
-        $this->sync->sync($this->party);
+        // Jetzt läuft etwas anderes: abgehakt, und der nächste Wunsch wartet auf seinen Moment.
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 1_000, isPlaying: true);
+        $result = $this->sync->sync($this->party);
+
         self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
+        self::assertStringContainsString('Gelaufen', (string) $result->message);
+        self::assertSame(SuggestionStatus::Open, $this->second->getStatus());
     }
 
-    /**
-     * Eine lange Warteschlange braucht ihre Zeit. Solange Spotify den Titel noch fuehrt, darf
-     * er nicht als verschwunden gebucht werden – sonst fliegt der Wunsch aus der Liste, bevor
-     * er ueberhaupt gelaufen ist. Erst wenn die Warteschlange nicht lesbar ist, entscheidet
-     * das Alter.
-     */
-    public function testWishStillListedBySpotifyWaitsLongerThanTheStaleLimit(): void
+    /** Zwei Wünsche hintereinander: Am Ende des einen startet die Büchse den nächsten. */
+    public function testOneWishFollowsTheOther(): void
     {
-        $this->top->markQueued($this->clock->now());
+        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 199_000, isPlaying: true);
+        $this->top->markPlaying($this->clock->now());
         $this->em->flush();
-        $this->spotify->queue = [$this->top->getSpotifyUri()];
-        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 30_000, isPlaying: true);
 
-        $this->clock->sleep(PlaybackSync::STALE_QUEUE_SECONDS + 60);
-        $this->sync->sync($this->party);
+        $result = $this->sync->sync($this->party);
 
-        self::assertSame(SuggestionStatus::Queued, $this->top->getStatus());
-
-        // Erst wenn Spotify ihn nicht mehr fuehrt, gilt er als verbraucht.
-        $this->spotify->queue = [];
-        $this->sync->sync($this->party);
-        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
+        self::assertContains(['play', [$this->second->getSpotifyUri()], null], $this->spotify->calls);
+        self::assertSame(SuggestionStatus::Played, $this->top->getStatus(), 'Der Vorgänger ist abgehakt.');
+        self::assertSame(SuggestionStatus::Playing, $this->second->getStatus());
+        self::assertStringContainsString('Second Wish', (string) $result->message);
     }
 
-    public function testWishPlayedManuallyByTheHostCountsAsPlayed(): void
+    public function testWishStartedManuallyByTheHostBecomesTheRunningTrack(): void
     {
         $this->spotify->state = $this->playing($this->second->toTrackInfo(), progressMs: 5_000, isPlaying: true);
 
         $this->sync->sync($this->party);
 
-        self::assertSame(SuggestionStatus::Played, $this->second->getStatus());
+        self::assertSame(SuggestionStatus::Playing, $this->second->getStatus());
         self::assertSame(SuggestionStatus::Open, $this->top->getStatus());
         self::assertSame('Ben', $this->party->getNowPlaying()['wishedBy']);
+        self::assertNotContains('play', $this->spotify->callNames(), 'Läuft schon, nicht neu starten.');
+    }
+
+    /** Lehnt Spotify den Start ab, gehört der Wunsch zurück in die Rangliste. */
+    public function testARefusedStartPutsTheWishBackIntoTheRanking(): void
+    {
+        $this->spotify->state = new PlaybackState('dev', 'Küche', false, 0, null, $this->clock->now());
+        $this->spotify->failPlayback = true;
+
+        $result = $this->sync->sync($this->party);
+
+        self::assertSame(Party::SYNC_ERROR, $result->status);
+        self::assertSame(SuggestionStatus::Open, $this->top->getStatus());
+        self::assertNull($this->top->getStartedAt());
     }
 
     public function testFallbackPlaylistStartsWhenIdleAndNothingIsWished(): void
@@ -328,6 +268,69 @@ final class PlaybackSyncTest extends KernelTestCase
 
         self::assertContains(['play', [], 'spotify:playlist:'.str_repeat('p', 22)], $this->spotify->calls);
         self::assertStringContainsString('Fallback', (string) $result->message);
+    }
+
+    /**
+     * Am Ende des letzten Wunsches übernimmt die Fallback-Playlist – sonst sucht sich Spotify
+     * mit Autoplay selbst aus, was danach läuft.
+     */
+    public function testFallbackPlaylistTakesOverAtTheEndOfTheLastWish(): void
+    {
+        $this->second->markPlayed($this->clock->now());
+        $this->top->markPlaying($this->clock->now());
+        $this->party->setFallbackPlaylistUri('spotify:playlist:'.str_repeat('p', 22));
+        $this->em->flush();
+
+        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 199_000, isPlaying: true);
+        $result = $this->sync->sync($this->party);
+
+        self::assertContains(['play', [], 'spotify:playlist:'.str_repeat('p', 22)], $this->spotify->calls);
+        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
+        self::assertStringContainsString('Fallback', (string) $result->message);
+    }
+
+    /** Die eigene Musik des Hosts fasst die Büchse dabei nicht an. */
+    public function testWithoutWishesTheHostsOwnTrackIsNotInterrupted(): void
+    {
+        $this->top->markPlayed($this->clock->now());
+        $this->second->markPlayed($this->clock->now());
+        $this->party->setFallbackPlaylistUri('spotify:playlist:'.str_repeat('p', 22));
+        $this->em->flush();
+
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 199_000, isPlaying: true);
+        $this->sync->sync($this->party);
+
+        self::assertNotContains('play', $this->spotify->callNames());
+    }
+
+    /** „Weiter“ in der Host-Ansicht startet selbst den nächsten Wunsch, statt Spotify zu fragen. */
+    public function testSkipStartsTheNextWishInsteadOfLettingSpotifyChoose(): void
+    {
+        $this->top->markPlaying($this->clock->now());
+        $this->em->flush();
+        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 20_000, isPlaying: true);
+
+        $result = $this->sync->skipCurrent($this->party);
+
+        self::assertSame(Party::SYNC_OK, $result->status);
+        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
+        self::assertSame(SuggestionStatus::Playing, $this->second->getStatus());
+        self::assertContains(['play', [$this->second->getSpotifyUri()], null], $this->spotify->calls);
+        self::assertNotContains('next', $this->spotify->callNames());
+    }
+
+    /** Ohne offenen Wunsch gehört der Player dem Host: dann wirklich nur weiterspringen. */
+    public function testSkipWithoutAnyWishLeftJustSkipsInSpotify(): void
+    {
+        $this->top->markPlayed($this->clock->now());
+        $this->second->markPlayed($this->clock->now());
+        $this->em->flush();
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 20_000, isPlaying: true);
+
+        $result = $this->sync->skipCurrent($this->party);
+
+        self::assertSame(Party::SYNC_OK, $result->status);
+        self::assertContains(['next'], $this->spotify->calls);
     }
 
     public function testSyncIfDueIsThrottled(): void

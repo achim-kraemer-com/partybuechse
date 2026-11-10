@@ -18,8 +18,8 @@ final class FakeSpotifyApi implements SpotifyApiInterface
     public ?PlaybackState $state = null;
     public bool $noActiveDevice = false;
 
-    /** @var string[] upcoming queue (URIs) */
-    public array $queue = [];
+    /** Spotify lehnt den Start ab (z. B. weil das Gerät zwischenzeitlich weg ist). */
+    public bool $failPlayback = false;
 
     /** @var array<int, array<int, mixed>> */
     public array $calls = [];
@@ -60,31 +60,17 @@ final class FakeSpotifyApi implements SpotifyApiInterface
         return $this->state;
     }
 
-    public function addToQueue(Host $host, string $uri, ?string $deviceId = null): void
-    {
-        $this->calls[] = ['queue', $uri];
-        $this->queue[] = $uri;
-    }
-
     public function startPlayback(Host $host, array $uris = [], ?string $contextUri = null, ?string $deviceId = null): void
     {
         $this->calls[] = ['play', $uris, $contextUri];
+        if ($this->failPlayback) {
+            throw new SpotifyApiException('Player command failed: No active device found', 404, 'NO_ACTIVE_DEVICE');
+        }
     }
 
     public function skipToNext(Host $host, ?string $deviceId = null): void
     {
         $this->calls[] = ['next'];
-    }
-
-    public function getQueueUris(Host $host): array
-    {
-        $this->calls[] = ['queue-list'];
-        $uris = [];
-        if (null !== $this->state?->track) {
-            $uris[] = $this->state->track->uri;
-        }
-
-        return array_merge($uris, $this->queue);
     }
 
     public function getDevices(Host $host): array

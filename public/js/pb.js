@@ -170,21 +170,28 @@
     };
 
     /**
-     * Polls the state endpoint. Pauses while the tab is hidden, backs off on errors.
+     * Polls the state endpoint; slows down while the tab is hidden, backs off on errors.
+     *
+     * Ein verstecktes Tab pollte früher gar nicht mehr. Jeder Poll stösst serverseitig den
+     * Abgleich mit Spotify an – ohne Poll startet die Partybüchse den nächsten Wunsch nicht,
+     * und Spotify spielt, was es selbst für richtig hält. Ein gesperrtes Handy reicht dafür.
+     * Browser bremsen Zeitgeber im Hintergrund trotzdem stark; verlässlich ist nur der
+     * Hintergrunddienst (app:party:sync --watch), das hier ist das Netz darunter.
      */
     PB.poll = function (url, intervalMs, onState) {
+        const HIDDEN_MS = 15000;
         let timer = null;
         let failures = 0;
         async function run() {
-            if (document.hidden) { schedule(intervalMs); return; }
+            const nextMs = document.hidden ? Math.max(intervalMs, HIDDEN_MS) : intervalMs;
             try {
                 const state = await PB.api(url);
                 failures = 0;
                 onState(state);
-                schedule(intervalMs);
+                schedule(nextMs);
             } catch (e) {
                 failures++;
-                schedule(Math.min(intervalMs * (failures + 1), 20000));
+                schedule(Math.min(nextMs * (failures + 1), 20000));
             }
         }
         function schedule(ms) { clearTimeout(timer); timer = setTimeout(run, ms); }

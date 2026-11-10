@@ -26,20 +26,11 @@ final class SpotifyClientTest extends TestCase
     }
 
     /**
-     * Der Fall aus dem Prod-Log: Spotify nimmt den Titel an und antwortet mit 200, aber mit
-     * einem Koerper, der kein JSON ist. Das darf die Uebergabe nicht abbrechen – es tat es,
-     * und damit blieb der Wunsch offen, obwohl er in Spotifys Warteschlange lag.
+     * Der Fall aus dem Prod-Log: Spotify nimmt den Befehl an und antwortet mit 200, aber mit
+     * einem Koerper, der kein JSON ist. Das darf den Start nicht abbrechen – es tat es, und
+     * damit fiel der Wunsch aus der Liste, obwohl Spotify ihn angenommen hatte.
      */
-    public function testAddToQueueSurvivesAResponseThatIsNotJson(): void
-    {
-        $client = $this->clientFor(new MockResponse('nicht JSON', ['http_code' => 200]));
-
-        $client->addToQueue($this->host(), 'spotify:track:'.str_repeat('a', 22));
-
-        $this->expectNotToPerformAssertions();
-    }
-
-    public function testStartPlaybackAndSkipSurviveTheSame(): void
+    public function testStartPlaybackAndSkipSurviveAResponseThatIsNotJson(): void
     {
         $client = $this->clientFor(
             new MockResponse('nicht JSON', ['http_code' => 200]),
@@ -62,7 +53,7 @@ final class SpotifyClientTest extends TestCase
         $this->expectException(SpotifyApiException::class);
         $this->expectExceptionMessage('No active device found');
 
-        $client->addToQueue($this->host(), 'spotify:track:'.str_repeat('a', 22));
+        $client->startPlayback($this->host(), ['spotify:track:'.str_repeat('a', 22)]);
     }
 
     /**

@@ -17,38 +17,44 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\Lock\LockFactory;
 
 /**
- * Keeps the party in step with the host's Spotify player.
+ * Die Partybüchse ist der DJ: sie startet jeden Wunsch selbst.
  *
- * One run:
- *  1. read the playback state and store a "now playing" snapshot on the party
- *  2. settle wishes that were handed to Spotify (now playing -> played; vanished -> consumed)
- *  3. if nothing of ours is pending in Spotify's queue, hand over the top-voted wish
- *     shortly before the current track ends, or start it right away if the player is idle
- *  4. with an empty ranking and an idle player, start the fallback playlist (if configured)
+ * Bis 11/2026 legte sie den Top-Wunsch kurz vor dem Ende des laufenden Titels in Spotifys
+ * Warteschlange. Das kann nicht zuverlässig funktionieren, denn diese Warteschlange gehört dem
+ * Spotify-Konto und nicht der Party: Die Web-API kann nur hineinlegen, nie herausnehmen oder
+ * umsortieren. Alles andere, was dort liegt – vom Host selbst eingereihte Titel, Autoplay,
+ * Reste einer früheren Party –, läuft zwischen den Wünschen an, und wer gerade oben in der
+ * Rangliste steht, entschied sich schon drei Minuten vorher. Genau das waren die „falschen
+ * Lieder“.
  *
- * The host keeps playing whatever they like in Spotify; wishes are inserted via the queue,
- * so the host's own playlist acts as a natural fallback.
+ * Jetzt wird nichts mehr eingereiht. Ein Durchgang:
+ *  1. Playback-Status lesen und als „Läuft gerade“ speichern.
+ *  2. Abschließen: Läuft unser gestarteter Titel nicht mehr, gilt er als gelaufen. Hat der Host
+ *     einen Wunsch von Hand gestartet, gilt er ab jetzt als der laufende.
+ *  3. Ist der Player untätig oder der laufende Titel fast zu Ende, den bestbewerteten Wunsch
+ *     direkt starten (PUT /me/player/play). Die Rangliste entscheidet im Moment des Wechsels.
+ *  4. Keine Wünsche offen und Player untätig: Fallback-Playlist starten (falls konfiguriert).
  *
- * Only the host's most recently started party steers the player; any other active party of the
- * same host goes to SYNC_STANDBY and keeps its hands off Spotify (see Party::SYNC_STANDBY).
+ * Der Preis sind die letzten Sekunden eines Titels: Die Büchse startet den nächsten Wunsch
+ * TAKEOVER_MS vor dem Ende, weil Spotify sonst von selbst weiterspringt und ein fremder Titel
+ * anfängt. Dafür entscheidet immer die Partybüchse, was als Nächstes läuft, und ein Wunsch kann
+ * nicht mehr in einer anderen Party anlaufen.
+ *
+ * Die Musik des Hosts bleibt der natürliche Rückfall: Solange nichts gewünscht ist, fasst die
+ * Büchse den Player nicht an (eine pausierte Wiedergabe ohnehin nie).
  */
 class PlaybackSync
 {
-    /** Hand the next wish to Spotify when at most this much of the current track is left. */
-    public const QUEUE_AHEAD_MS = 20_000;
-
     /**
-     * Last resort for a queued wish while Spotify's queue cannot be read: after this long
-     * without the wish coming on, it counts as consumed. As long as the queue *can* be read,
-     * what it says decides - a wish still listed there waits however long it takes.
+     * So lange vor dem Ende des laufenden Titels wird der nächste Wunsch gestartet.
+     *
+     * Muss über dem Abstand zweier Durchgänge liegen (MIN_INTERVAL_SECONDS), sonst fällt das
+     * Fenster zwischen zwei Durchgänge und Spotify springt vorher selbst weiter.
      */
-    public const STALE_QUEUE_SECONDS = 20 * 60;
+    public const TAKEOVER_MS = 3_000;
 
-    /** Give Spotify this long to reflect a queue change before judging it lost. */
-    public const QUEUE_GRACE_SECONDS = 90;
-
-    /** Polling clients trigger a sync at most this often. */
-    public const MIN_INTERVAL_SECONDS = 4;
+    /** Polling clients and the worker trigger a sync at most this often. */
+    public const MIN_INTERVAL_SECONDS = 2;
 
     public function __construct(
         private readonly SpotifyApiInterface $spotify,
@@ -76,31 +82,28 @@ class PlaybackSync
             return null;
         }
 
-        $lock = $this->lockFactory->createLock('party-sync-'.$party->getId(), 30.0, false);
-        if (!$lock->acquire()) {
-            return null;
-        }
-
-        try {
-            return $this->sync($party);
-        } finally {
-            $lock->release();
-        }
+        return $this->locked($party, fn (): SyncResult => $this->run($party));
     }
 
+    /** Ein Durchgang, auch wenn gerade erst einer war. */
     public function sync(Party $party): SyncResult
+    {
+        return $this->locked($party, fn (): SyncResult => $this->run($party))
+            ?? new SyncResult($party->getSyncStatus(), 'Der Abgleich läuft gerade.');
+    }
+
+    private function run(Party $party): SyncResult
     {
         $host = $party->getHost();
         $now = $this->clock->now();
-        $actions = [];
 
         if (!$party->isActive()) {
             return new SyncResult(Party::SYNC_ENDED, 'Die Party ist beendet.');
         }
 
-        // Ein Spotify-Konto hat genau einen Player. Lief eine zweite Party gegen dasselbe
-        // Konto, buchten beide den laufenden Titel als ihren eigenen und legten beide Wuensche
-        // in dieselbe Warteschlange. Nur die zuletzt gestartete Party steuert.
+        // Ein Spotify-Konto hat genau einen Player, also steuert ihn genau eine Party. Eine
+        // neue Party beendet die laufende (HostController::create), hierher kommt also nur
+        // noch, was vor dieser Regel entstanden ist: Hände weg vom Player.
         $current = $this->parties->findCurrentByHost($host);
         if (null !== $current && $current->getId() !== $party->getId()) {
             $party->setNowPlaying(null);
@@ -131,24 +134,12 @@ class PlaybackSync
             return new SyncResult(Party::SYNC_NO_DEVICE, $party->getSyncMessage());
         }
 
-        $current = $state->track;
+        $actions = [];
 
         try {
-            if (null !== $skipped = $this->skipLeftoverOfAnotherParty($party, $state, $now)) {
-                return $skipped;
-            }
-
-            $actions = array_merge($actions, $this->settleQueuedWishes($party, $state, $now));
-
-            $nowPlaying = $state->toArray();
-            $nowPlaying['wishedBy'] = null;
-            if (null !== $current) {
-                $wish = $this->suggestions->findLastPlayedByUri($party, $current->uri);
-                $nowPlaying['wishedBy'] = $wish?->getSuggestedBy()?->getLabel();
-            }
-            $party->setNowPlaying($nowPlaying);
-
-            $actions = array_merge($actions, $this->feedSpotify($party, $state, $now));
+            $actions = $this->settle($party, $state, $now);
+            $this->snapshot($party, $state);
+            $actions = array_merge($actions, $this->play($party, $state, $now));
         } catch (SpotifyApiException $e) {
             $this->entityManager->flush();
 
@@ -167,121 +158,78 @@ class PlaybackSync
     }
 
     /**
-     * Lets go of a track that this host handed to Spotify for a different party.
+     * „Weiter“ aus der Host-Ansicht: den laufenden Wunsch abhaken und sofort den nächsten starten.
      *
-     * Spotifys Warteschlange gehört dem Konto, nicht der Party, und die API kann einen Titel
-     * nicht wieder herausnehmen. Ein Wunsch, der kurz vor dem Ende seiner Party übergeben
-     * wurde, läuft deshalb mitten in der nächsten – die Gäste hören ein Lied, das sich hier
-     * niemand gewünscht hat. Verhindern können wir das nicht, aber wir können ihn ziehen
-     * lassen, sobald er anfängt.
-     *
-     * Übersprungen wird höchstens einer pro Durchgang, und nur genau der Titel, der gerade
-     * läuft: so entscheidet jedes Mal die Wirklichkeit und nie eine Zählung, die danebenliegen
-     * könnte. Drei Überreste sind nach drei Durchgängen weg.
+     * Ein blosses skipToNext würde Spotify entscheiden lassen, was als Nächstes kommt – und
+     * damit wäre genau das zurück, was der DJ-Modus abschafft. Ohne offenen Wunsch bleibt es
+     * beim Weiterspringen, dann gehört der Player wieder dem Host.
      */
-    private function skipLeftoverOfAnotherParty(Party $party, PlaybackState $state, \DateTimeImmutable $now): ?SyncResult
+    public function skipCurrent(Party $party): SyncResult
     {
-        $current = $state->track;
-        if (null === $current || !$state->isPlaying) {
-            return null;
+        $now = $this->clock->now();
+
+        if (!$party->isActive()) {
+            return new SyncResult(Party::SYNC_ENDED, 'Die Party ist beendet.');
         }
 
-        // Steht der Titel auch auf dieser Liste, gehört er hierher und bleibt.
-        if (null !== $this->suggestions->findPendingByUri($party, $current->uri)) {
-            return null;
-        }
+        return $this->locked($party, function () use ($party, $now): SyncResult {
+            try {
+                $state = $this->spotify->getPlaybackState($party->getHost());
+            } catch (SpotifyApiException $e) {
+                if (!$e->isNoActiveDevice()) {
+                    return $this->fail($party, $e, $now);
+                }
+                $state = null;
+            }
 
-        $leftover = $this->suggestions->findQueuedInAnotherParty($party, $current->uri);
-        if (null === $leftover) {
-            return null;
-        }
+            $top = $this->suggestions->findTopOpen($party);
 
-        // Erst vermerken, dann überspringen. Andersherum würde ein verlorener Schreibvorgang
-        // beim nächsten Poll erneut überspringen – und dann träfe es den Titel danach, also
-        // womöglich die Musik des Hosts.
-        $leftover->markRemoved();
-        $this->entityManager->flush();
+            try {
+                if (null !== $top) {
+                    $actions = $this->start($party, $top, $now, 'Gestartet', $state?->deviceId);
+                } else {
+                    $this->closeRunning($party, $now);
+                    $this->spotify->skipToNext($party->getHost(), $state?->deviceId);
+                    $actions = ['Übersprungen'];
+                }
+            } catch (SpotifyApiException $e) {
+                return $this->fail($party, $e, $now);
+            }
 
-        $this->spotify->skipToNext($party->getHost(), $state->deviceId);
+            $message = implode(' · ', $actions);
+            $party->setSync(Party::SYNC_OK, $message, $now);
+            $this->entityManager->flush();
 
-        $message = sprintf(
-            'Übersprungen: „%s“ lag noch aus der Party „%s“ in Spotifys Warteschlange.',
-            $current->title,
-            $leftover->getParty()->getName(),
-        );
-        $party->setNowPlaying(null);
-        $party->setSync(Party::SYNC_OK, $message, $now);
-        $this->entityManager->flush();
-
-        $this->logger->info('Skipped a leftover from another party', [
-            'party' => $party->getCode(),
-            'from' => $leftover->getParty()->getCode(),
-            'wish' => $leftover->getSpotifyUri(),
-        ]);
-
-        return new SyncResult(Party::SYNC_OK, $message, [$message]);
+            return new SyncResult(Party::SYNC_OK, $message, $actions);
+        }) ?? new SyncResult($party->getSyncStatus(), 'Der Abgleich läuft gerade, bitte noch einmal.');
     }
 
     /**
-     * Marks queued wishes as played when they come on, and as consumed when they vanished from Spotify's queue.
+     * Bringt die Wunschliste mit dem Player in Übereinstimmung.
      *
      * @return string[]
      */
-    private function settleQueuedWishes(Party $party, PlaybackState $state, \DateTimeImmutable $now): array
+    private function settle(Party $party, PlaybackState $state, \DateTimeImmutable $now): array
     {
         $actions = [];
         $current = $state->track;
-        $queued = $this->suggestions->findQueued($party);
+        $running = $this->suggestions->findPlaying($party);
 
-        // A wish the host started by hand in Spotify counts as played, too.
-        if (null !== $current) {
-            $pending = $this->suggestions->findPendingByUri($party, $current->uri);
-            if (null !== $pending && $pending->isOpen()) {
-                $pending->markPlayed($now);
-                $actions[] = sprintf('Läuft: %s', $this->label($pending));
-            }
+        // Unser Titel läuft nicht mehr: durch. (Spotify kennt kein „fertig“, nur das, was
+        // jetzt läuft – deshalb entscheidet immer der Player und nie eine Uhr.)
+        if (null !== $running && (null === $current || $running->getSpotifyUri() !== $current->uri)) {
+            $running->markPlayed($now);
+            $actions[] = sprintf('Gelaufen: %s', $this->label($running));
+            $running = null;
         }
 
-        if ([] === $queued) {
-            $this->entityManager->flush();
-
-            return $actions;
-        }
-
-        $queueUris = null;
-        foreach ($queued as $wish) {
-            if (null !== $current && $wish->getSpotifyUri() === $current->uri) {
-                $wish->markPlayed($now);
+        // Hat der Host einen Wunsch in Spotify selbst gestartet, ist er ab jetzt der laufende.
+        if (null === $running && null !== $current) {
+            $wish = $this->suggestions->findPendingByUri($party, $current->uri);
+            if (null !== $wish && $wish->isOpen()) {
+                $wish->markPlaying($now);
                 $actions[] = sprintf('Läuft: %s', $this->label($wish));
-                continue;
             }
-
-            $age = $now->getTimestamp() - ($wish->getQueuedAt()?->getTimestamp() ?? $now->getTimestamp());
-            if ($age < self::QUEUE_GRACE_SECONDS) {
-                continue;
-            }
-
-            $queueUris ??= $this->safeQueueUris($party);
-
-            // Liegt der Titel noch in Spotifys Warteschlange, warten wir – ganz egal, wie lange
-            // das dauert. Eine lange Warteschlange braucht ihre Zeit, und ihn nach 20 Minuten
-            // als verschwunden zu buchen, obwohl Spotify ihn noch hat, nimmt den Wunsch aus der
-            // Liste, bevor er gelaufen ist.
-            if (null !== $queueUris && \in_array($wish->getSpotifyUri(), $queueUris, true)) {
-                continue;
-            }
-
-            if (null === $queueUris) {
-                // Warteschlange nicht lesbar: dann bleibt nur das Alter als Anhaltspunkt.
-                if ($age >= self::STALE_QUEUE_SECONDS) {
-                    $wish->markPlayed($now);
-                    $actions[] = sprintf('Aus der Warteschlange verschwunden: %s', $this->label($wish));
-                }
-                continue;
-            }
-
-            $wish->markPlayed($now);
-            $actions[] = sprintf('Nicht mehr in der Warteschlange: %s', $this->label($wish));
         }
 
         $this->entityManager->flush();
@@ -289,118 +237,99 @@ class PlaybackSync
         return $actions;
     }
 
+    /** Speichert, was gerade läuft – samt dem Gast, der es sich gewünscht hat. */
+    private function snapshot(Party $party, PlaybackState $state): void
+    {
+        $nowPlaying = $state->toArray();
+        $nowPlaying['wishedBy'] = null;
+
+        $current = $state->track;
+        if (null !== $current) {
+            $running = $this->suggestions->findPlaying($party);
+            $wish = null !== $running && $running->getSpotifyUri() === $current->uri
+                ? $running
+                : $this->suggestions->findLastPlayedByUri($party, $current->uri);
+            $nowPlaying['wishedBy'] = $wish?->getSuggestedBy()?->getLabel();
+        }
+
+        $party->setNowPlaying($nowPlaying);
+    }
+
     /**
-     * Hands the top wish to Spotify when the time is right, or starts the fallback playlist.
+     * Startet den nächsten Wunsch, wenn es Zeit dafür ist, oder die Fallback-Playlist.
      *
      * @return string[]
      */
-    private function feedSpotify(Party $party, PlaybackState $state, \DateTimeImmutable $now): array
+    private function play(Party $party, PlaybackState $state, \DateTimeImmutable $now): array
     {
-        $host = $party->getHost();
         $current = $state->track;
+        $remaining = $state->remainingMs();
 
-        if ([] !== $this->suggestions->findQueued($party)) {
-            return []; // one of ours is already waiting in Spotify's queue
+        // Pausiert: Der Host hat die Musik angehalten. Dann hält sich die Büchse zurück.
+        if (null !== $current && !$state->isPlaying && $state->progressMs > 0 && (null === $remaining || $remaining >= 1_500)) {
+            return [];
         }
 
-        $remaining = $state->remainingMs();
-        $idle = null === $current
-            || (!$state->isPlaying && (0 === $state->progressMs || (null !== $remaining && $remaining < 1_500)));
-
+        $idle = null === $current || !$state->isPlaying;
         $top = $this->suggestions->findTopOpen($party);
 
-        if (null !== $top) {
-            if ($idle) {
-                return $this->handOver(
-                    $party,
-                    $top,
-                    $now,
-                    'Gestartet',
-                    fn () => $this->spotify->startPlayback($host, [$top->getSpotifyUri()], null, $state->deviceId),
-                );
+        if (null === $top) {
+            $fallback = $party->getFallbackPlaylistUri();
+            if (null === $fallback) {
+                return [];
             }
 
-            if ($state->isPlaying && null !== $remaining && $remaining <= self::QUEUE_AHEAD_MS) {
-                // Spotify selbst fragen, bevor wir etwas hineinlegen. Geht die Buchhaltung
-                // unten verloren, wandert derselbe Titel sonst bei jedem Poll erneut in die
-                // Warteschlange – bei 4 Sekunden Pollabstand fünfmal pro Fenster.
-                $queueUris = $this->safeQueueUris($party);
-                if (null !== $queueUris && \in_array($top->getSpotifyUri(), $queueUris, true)) {
-                    // Spotify hat den Titel schon, nur unsere Liste weiss es nicht. Nachtragen,
-                    // nicht bloss abbrechen: sonst bleibt der Wunsch oben in der Rangliste
-                    // stehen, blockiert dort bei jedem Poll erneut diese Stelle, und der
-                    // naechste Wunsch wird nie uebergeben – die Liste bewegt sich nicht mehr.
-                    $top->markQueued($now);
-                    $this->entityManager->flush();
-                    $this->logger->notice('Wish was already in Spotify\'s queue, recorded as queued', [
-                        'party' => $party->getCode(),
-                        'wish' => $top->getSpotifyUri(),
-                    ]);
+            // Auch am Ende des letzten Wunsches: Sonst sucht Spotify sich selbst aus, was
+            // danach läuft (Autoplay mit „ähnlichen“ Titeln). Angefasst wird dabei nur ein
+            // Titel, den die Büchse selbst gestartet hat – die Musik des Hosts bleibt ihre.
+            $running = $this->suggestions->findPlaying($party);
+            $ourTrackIsEnding = null !== $running && null !== $remaining && $remaining <= self::TAKEOVER_MS;
 
-                    return [sprintf('War schon bei Spotify: %s', $this->label($top))];
-                }
+            if ($idle || $ourTrackIsEnding) {
+                $this->closeRunning($party, $now);
+                $this->spotify->startPlayback($party->getHost(), [], $fallback, $state->deviceId);
 
-                return $this->handOver(
-                    $party,
-                    $top,
-                    $now,
-                    'In die Warteschlange',
-                    fn () => $this->spotify->addToQueue($host, $top->getSpotifyUri(), $state->deviceId),
-                );
+                return ['Keine Wünsche offen, Fallback-Playlist gestartet'];
             }
 
             return [];
         }
 
-        $fallback = $party->getFallbackPlaylistUri();
-        if ($idle && null !== $fallback) {
-            $this->spotify->startPlayback($host, [], $fallback, $state->deviceId);
+        if ($idle) {
+            return $this->start($party, $top, $now, 'Gestartet', $state->deviceId);
+        }
 
-            return ['Keine Wünsche offen, Fallback-Playlist gestartet'];
+        if (null !== $remaining && $remaining <= self::TAKEOVER_MS) {
+            return $this->start($party, $top, $now, 'Übernommen', $state->deviceId);
         }
 
         return [];
     }
 
     /**
-     * Hands one wish to Spotify and keeps both sides in step.
+     * Startet einen Wunsch auf dem Player des Hosts.
      *
-     * The wish is recorded as queued *before* the call. The other way round, a lost
-     * write leaves Spotify holding the track while our list still shows it as open,
-     * and the next poll hands it over again. If Spotify refuses, the wish goes back
-     * into the ranking.
-     *
-     * @param callable(): void $call
+     * Erst vermerken, dann starten: Geht der Schreibvorgang verloren, läuft der Titel, ohne
+     * dass die Liste es weiss – und beim nächsten Durchgang würde er erneut von vorn beginnen.
+     * Lehnt Spotify ab, geht der Wunsch zurück in die Rangliste.
      *
      * @return string[]
      */
-    private function handOver(Party $party, Suggestion $wish, \DateTimeImmutable $now, string $what, callable $call): array
+    private function start(Party $party, Suggestion $wish, \DateTimeImmutable $now, string $what, ?string $deviceId): array
     {
-        $wish->markQueued($now);
+        $this->closeRunning($party, $now);
+        $wish->markPlaying($now);
         $this->entityManager->flush();
 
         try {
-            $call();
-        } catch (SpotifyApiException $e) {
-            // Spotify hat geantwortet und abgelehnt: der Titel liegt nicht in der
-            // Warteschlange, der Wunsch gehört zurück in die Rangliste.
+            $this->spotify->startPlayback($party->getHost(), [$wish->getSpotifyUri()], null, $deviceId);
+        } catch (\Throwable $e) {
+            // Zurück in die Rangliste. Läuft der Titel trotzdem (Zeitüberschreitung ohne
+            // Antwort), merkt settle() das beim nächsten Durchgang am Player und bucht ihn
+            // wieder als den laufenden – so oder so entscheidet die Wirklichkeit.
             $wish->reopen();
             $this->entityManager->flush();
-            $this->logger->warning('Spotify refused the hand-over, wish is back in the ranking', [
-                'party' => $party->getCode(),
-                'wish' => $wish->getSpotifyUri(),
-                'error' => $e->getMessage(),
-            ]);
-
-            throw $e;
-        } catch (\Throwable $e) {
-            // Gar keine Antwort (Zeitüberschreitung, Verbindungsabbruch): ob Spotify den Titel
-            // angenommen hat, wissen wir nicht. Der Wunsch bleibt deshalb auf "queued", damit
-            // settleQueuedWishes beim nächsten Durchgang in Spotifys Warteschlange nachsieht
-            // und die Tatsachen entscheiden. Setzten wir ihn hier zurück und Spotify hätte ihn
-            // doch, läge er unsichtbar in der Warteschlange und liefe irgendwann in einer
-            // anderen Party an.
-            $this->logger->warning('Hand-over to Spotify got no answer, wish stays queued', [
+            $this->logger->warning('Spotify refused to start the wish, it is back in the ranking', [
                 'party' => $party->getCode(),
                 'wish' => $wish->getSpotifyUri(),
                 'error' => $e->getMessage(),
@@ -409,7 +338,7 @@ class PlaybackSync
             throw $e;
         }
 
-        $this->logger->info('Wish handed to Spotify', [
+        $this->logger->info('Wish started', [
             'party' => $party->getCode(),
             'what' => $what,
             'wish' => $wish->getSpotifyUri(),
@@ -418,15 +347,31 @@ class PlaybackSync
         return [sprintf('%s: %s', $what, $this->label($wish))];
     }
 
-    /** @return string[]|null */
-    private function safeQueueUris(Party $party): ?array
+    /** Hakt ab, was die Büchse zuletzt gestartet hat. */
+    private function closeRunning(Party $party, \DateTimeImmutable $now): void
     {
-        try {
-            return $this->spotify->getQueueUris($party->getHost());
-        } catch (SpotifyApiException $e) {
-            $this->logger->notice('Could not read the Spotify queue', ['error' => $e->getMessage()]);
+        foreach ($this->suggestions->findPlayingAll($party) as $running) {
+            $running->markPlayed($now);
+        }
+    }
 
+    /**
+     * Führt den Aufruf aus, solange kein anderer Durchgang für diese Party läuft.
+     *
+     * Zwei gleichzeitige Durchgänge – etwa der Hintergrunddienst und ein Seitenaufruf – würden
+     * beide denselben Wunsch starten und damit den Titel mitten im Lied neu beginnen.
+     */
+    private function locked(Party $party, callable $call): ?SyncResult
+    {
+        $lock = $this->lockFactory->createLock('party-sync-'.$party->getId(), 30.0, false);
+        if (!$lock->acquire()) {
             return null;
+        }
+
+        try {
+            return $call();
+        } finally {
+            $lock->release();
         }
     }
 

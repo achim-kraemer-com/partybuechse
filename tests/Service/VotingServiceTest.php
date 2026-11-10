@@ -119,10 +119,10 @@ final class VotingServiceTest extends KernelTestCase
         self::assertCount(1, $this->suggestions->findRanking($this->party));
     }
 
-    public function testQueuedWishesCannotBeVotedOn(): void
+    public function testTheRunningWishCannotBeVotedOn(): void
     {
         $one = $this->voting->suggest($this->anna, Fixtures::track('1', 'One'));
-        $one->markQueued(new \DateTimeImmutable());
+        $one->markPlaying(new \DateTimeImmutable());
         $this->em->flush();
 
         $this->expectException(VotingException::class);

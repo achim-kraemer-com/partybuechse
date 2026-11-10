@@ -32,10 +32,12 @@ interface SpotifyApiInterface
      */
     public function getPlaybackState(Host $host): ?PlaybackState;
 
-    /** @throws SpotifyApiException */
-    public function addToQueue(Host $host, string $uri, ?string $deviceId = null): void;
-
     /**
+     * Starts exactly these tracks (or a playlist context) on the host's player.
+     *
+     * The app plays every wish itself; nothing is ever put into Spotify's queue, because that
+     * queue belongs to the account and the Web API cannot take anything out of it again.
+     *
      * @param string[] $uris
      *
      * @throws SpotifyApiException
@@ -44,15 +46,6 @@ interface SpotifyApiInterface
 
     /** @throws SpotifyApiException */
     public function skipToNext(Host $host, ?string $deviceId = null): void;
-
-    /**
-     * URIs of the currently playing item (first) and the upcoming queue.
-     *
-     * @return string[]
-     *
-     * @throws SpotifyApiException
-     */
-    public function getQueueUris(Host $host): array;
 
     /**
      * @return array<int, array{id: string, name: string, type: string, is_active: bool}>

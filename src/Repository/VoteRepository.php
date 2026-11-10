@@ -26,7 +26,7 @@ class VoteRepository extends ServiceEntityRepository
         return $this->findOneBy(['guest' => $guest, 'suggestion' => $suggestion]);
     }
 
-    /** Votes that are still "spent": the wish is open or queued. */
+    /** Votes that are still "spent": the wish is open or playing. */
     public function countActiveVotesForGuest(Guest $guest): int
     {
         return (int) $this->createQueryBuilder('v')
@@ -35,12 +35,12 @@ class VoteRepository extends ServiceEntityRepository
             ->andWhere('v.guest = :guest')
             ->andWhere('s.status IN (:statuses)')
             ->setParameter('guest', $guest)
-            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Queued->value])
+            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Playing->value])
             ->getQuery()
             ->getSingleScalarResult();
     }
 
-    /** @return int[] suggestion ids the guest has voted for (open or queued only) */
+    /** @return int[] suggestion ids the guest has voted for (open or playing only) */
     public function findActiveSuggestionIdsForGuest(Guest $guest): array
     {
         $rows = $this->createQueryBuilder('v')
@@ -49,7 +49,7 @@ class VoteRepository extends ServiceEntityRepository
             ->andWhere('v.guest = :guest')
             ->andWhere('s.status IN (:statuses)')
             ->setParameter('guest', $guest)
-            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Queued->value])
+            ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Playing->value])
             ->getQuery()
             ->getScalarResult();
 

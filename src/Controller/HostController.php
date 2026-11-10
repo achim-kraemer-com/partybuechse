@@ -16,8 +16,6 @@ use App\Service\PlaybackSync;
 use App\Service\PublicUrlResolver;
 use App\Service\SpotifyUri;
 use App\Service\VotingService;
-use App\Spotify\SpotifyApiException;
-use App\Spotify\SpotifyApiInterface;
 use App\Spotify\SpotifyAuthenticator;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
@@ -79,8 +77,8 @@ class HostController extends AbstractController
         $party->setFallbackPlaylistUri(SpotifyUri::normalizePlaylist($request->request->get('fallback_playlist')));
 
         // Ein Spotify-Konto, ein Player, eine Party: die vorige wird beendet. Liefen zwei
-        // gleichzeitig, buchten beide den laufenden Titel als ihren eigenen und legten beide
-        // Wuensche in dieselbe Warteschlange.
+        // gleichzeitig, buchten beide den laufenden Titel als ihren eigenen und beide
+        // schickten ihre Wuensche an denselben Player.
         $ended = [];
         foreach ($this->parties->findActiveByHost($host) as $running) {
             $running->end($this->clock->now());
@@ -157,7 +155,7 @@ class HostController extends AbstractController
     }
 
     #[Route('/party/{code}/skip', name: 'host_party_skip', methods: ['POST'])]
-    public function skip(string $code, Request $request, SpotifyApiInterface $spotify, PlaybackSync $sync): Response
+    public function skip(string $code, Request $request, PlaybackSync $sync): Response
     {
         if (null === $host = $this->hostSession->getHost()) {
             return $this->spotifyRequired();
@@ -165,14 +163,13 @@ class HostController extends AbstractController
         $party = $this->ownParty($host, $code);
 
         if ($this->isCsrfTokenValid('host_party_action', (string) $request->request->get('_token'))) {
-            try {
-                $spotify->skipToNext($host);
-                usleep(600_000); // give Spotify a moment before reading the new state
-                $sync->sync($party);
-                $this->addFlash('success', 'Übersprungen.');
-            } catch (SpotifyApiException $e) {
-                $this->addFlash('error', $e->userMessage());
-            }
+            // Nicht einfach skipToNext: dann entscheidet Spotify, was als Nächstes kommt.
+            // Der DJ hakt den laufenden Titel ab und startet selbst den nächsten Wunsch.
+            $result = $sync->skipCurrent($party);
+            $this->addFlash(
+                Party::SYNC_ERROR === $result->status ? 'error' : 'success',
+                $result->message ?? 'Übersprungen.',
+            );
         }
 
         return $this->redirectToRoute('host_party', ['code' => $party->getCode()]);
@@ -259,19 +256,9 @@ class HostController extends AbstractController
         }
 
         $name = $party->getName();
-        $withSpotify = $deleter->wishesStillWithSpotify($party);
         $deleter->delete($party);
 
         $this->addFlash('success', sprintf('Party „%s“ mit allen Wünschen, Stimmen und Gästen gelöscht.', $name));
-
-        // Nach dem Löschen weiss die Partybüchse nicht mehr, dass diese Titel von hier stammen,
-        // und kann sie in der naechsten Party nicht mehr wegräumen.
-        if ([] !== $withSpotify) {
-            $this->addFlash('info', sprintf(
-                '%s liegt noch in Spotifys Warteschlange und läuft dort irgendwann an. Leere die Warteschlange in Spotify, wenn du das nicht willst.',
-                implode(', ', array_map(static fn ($wish): string => sprintf('„%s“', $wish->getTitle()), $withSpotify)),
-            ));
-        }
 
         return $this->redirectToRoute('host_dashboard');
     }

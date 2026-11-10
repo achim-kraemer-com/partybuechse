@@ -9,10 +9,16 @@ enum SuggestionStatus: string
     /** In the ranking, waiting for votes. */
     case Open = 'open';
 
-    /** Handed to Spotify's queue, will play next. */
-    case Queued = 'queued';
+    /**
+     * Started by the Partybüchse (or by the host in Spotify) and playing right now.
+     *
+     * There is at most one of these per party: the app starts every track itself, one at a
+     * time, instead of filling Spotify's queue. "playing" sorts before "open" (DESC), which is
+     * what keeps the running track at the top of the ranking.
+     */
+    case Playing = 'playing';
 
-    /** Has been played (or is playing right now). */
+    /** Has been played. */
     case Played = 'played';
 
     /** Removed by the host. */
@@ -22,7 +28,7 @@ enum SuggestionStatus: string
     public function bindsVotes(): bool
     {
         return match ($this) {
-            self::Open, self::Queued => true,
+            self::Open, self::Playing => true,
             self::Played, self::Removed => false,
         };
     }

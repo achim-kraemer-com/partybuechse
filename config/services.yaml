@@ -41,5 +41,10 @@ services:
             - '../src/Service/SpotifyUri.php'
             - '../src/Service/VotingException.php'
             - '../src/Security/HostUser.php'
+            - '../src/Doctrine/SqlitePragmasDriver.php'
 
     App\Spotify\SpotifyApiInterface: '@App\Spotify\SpotifyClient'
+
+    # SQLite auf WAL stellen, siehe die Klasse
+    App\Doctrine\SqlitePragmasMiddleware:
+        tags: ['doctrine.middleware']

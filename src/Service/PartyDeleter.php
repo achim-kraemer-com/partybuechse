@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\Party;
-use App\Entity\Suggestion;
-use App\Repository\SuggestionRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -23,23 +21,7 @@ class PartyDeleter
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly SuggestionRepository $suggestions,
     ) {
-    }
-
-    /**
-     * Wünsche, die beim Löschen noch in Spotifys Warteschlange liegen.
-     *
-     * Die Partybüchse kann sie dort nicht herausnehmen, und nach dem Löschen weiß sie auch
-     * nicht mehr, dass sie von hier stammen – dann läuft so ein Titel irgendwann mitten in
-     * einer anderen Party an, ohne dass ihn jemand überspringt. Deshalb vor dem Löschen
-     * erfragen und dem Host sagen.
-     *
-     * @return Suggestion[]
-     */
-    public function wishesStillWithSpotify(Party $party): array
-    {
-        return $this->suggestions->findQueued($party);
     }
 
     public function delete(Party $party): void

@@ -84,7 +84,7 @@ class VotingService
 
         if (!$suggestion->isOpen()) {
             throw new VotingException(match ($suggestion->getStatus()) {
-                SuggestionStatus::Queued => 'Der Titel läuft gleich, Stimmen sind nicht mehr nötig.',
+                SuggestionStatus::Playing => 'Der Titel läuft gerade, Stimmen sind nicht mehr nötig.',
                 SuggestionStatus::Played => 'Der Titel wurde schon gespielt.',
                 default => 'Der Wunsch ist nicht mehr in der Liste.',
             });

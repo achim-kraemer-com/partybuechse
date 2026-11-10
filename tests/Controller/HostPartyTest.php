@@ -105,27 +105,6 @@ final class HostPartyTest extends WebTestCase
         self::assertSame(0, $this->rowsOf(Guest::class));
     }
 
-    /**
-     * Nach dem Löschen weiß die Partybüchse nicht mehr, dass dieser Titel von hier stammt –
-     * dann überspringt ihn in der nächsten Party auch niemand mehr. Also vorher sagen.
-     */
-    public function testDeletingSaysWhichWishesStillSitInSpotifysQueue(): void
-    {
-        $host = Fixtures::host($this->em, $this->now);
-        $party = Fixtures::party($this->em, $host, $this->now, code: 'OLD11', name: 'Alte Party');
-        $guest = Fixtures::guest($this->em, $party, $this->now, str_repeat('a', 48), 'Anna');
-        $wish = static::getContainer()->get(VotingService::class)->suggest($guest, Fixtures::track('1', 'Schon übergeben'));
-        $wish->markQueued($this->now);
-        $this->em->flush();
-
-        $this->client->request('GET', '/host/party/OLD11');
-        $this->client->submitForm('Party löschen');
-        $this->client->followRedirect();
-
-        self::assertSelectorTextContains('.flash-info', 'Schon übergeben');
-        self::assertSelectorTextContains('.flash-info', 'Spotifys Warteschlange');
-    }
-
     private function rowsOf(string $entity): int
     {
         return (int) static::getContainer()->get(EntityManagerInterface::class)

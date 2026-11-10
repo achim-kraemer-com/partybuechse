@@ -16,14 +16,14 @@
 
     function row(item) {
         const classes = ['track'];
-        if (item.status === 'queued') classes.push('is-queued');
+        if (item.status === 'playing') classes.push('is-playing');
         if (item.position <= 3) classes.push('top-' + item.position);
         return PB.h('li', { class: classes.join(' ') },
             PB.h('div', { class: 'rank' }, String(item.position)),
             PB.cover(item.imageUrl, item.title),
             PB.h('div', { class: 'track-meta' },
                 PB.h('div', { class: 'track-title', title: item.title }, item.title, ' ',
-                    item.status === 'queued' ? PB.h('span', { class: 'badge badge-queued' }, 'läuft gleich') : null),
+                    item.status === 'playing' ? PB.h('span', { class: 'badge badge-playing' }, 'läuft gerade') : null),
                 PB.h('div', { class: 'track-sub' }, item.artists,
                     item.suggestedBy ? PB.h('span', { class: 'by' }, ' · von ' + item.suggestedBy) : null)),
             PB.h('div', { class: 'vote-static' }, String(item.votes), PB.h('small', null, 'Stimmen'))

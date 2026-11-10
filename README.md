@@ -1,11 +1,11 @@
 # Partybüchse
 
-Gäste scannen einen QR-Code, wünschen sich Songs aus dem Spotify-Katalog, bewerten die Wünsche der anderen, und der bestbewertete Titel wandert automatisch in die Spotify-Warteschlange des Hosts.
+Gäste scannen einen QR-Code, wünschen sich Songs aus dem Spotify-Katalog, bewerten die Wünsche der anderen, und die Partybüchse startet den bestbewerteten Titel auf dem Spotify-Gerät des Hosts.
 
 - Jeder Gast hat **3 Stimmen** (einstellbar). Ein eigener Wunsch kostet eine Stimme, Stimmen für fremde Wünsche ebenfalls.
 - Sobald ein Wunsch gelaufen ist, bekommen alle Wähler ihre Stimme zurück.
 - Gäste brauchen **keine App und keinen Account**. Der Host-Bereich liegt hinter einer Login-Maske; nur der Host verbindet sein Spotify-Premium-Konto.
-- Die Musik läuft über den normalen Spotify-Client des Hosts (Spotify Connect). Was der Host selbst abspielt, dient als natürlicher Fallback, Wünsche werden kurz vor Ende des laufenden Titels eingereiht.
+- Die Musik läuft über den normalen Spotify-Client des Hosts (Spotify Connect). **Die Partybüchse ist der DJ:** Sie startet jeden Wunsch selbst, kurz vor dem Ende des laufenden Titels, und reiht nichts in Spotifys Warteschlange ein. Was der Host selbst abspielt, läuft weiter, solange nichts gewünscht ist.
 
 Symfony 7.4 · PHP ≥ 8.2 · SQLite · kein Build-Schritt im Frontend · Docker-Image für den Server.
 
@@ -141,32 +141,76 @@ Spotify liegen auf dem Server.
 hochgezählt. `tests/WebApp/InstallableAppTest.php` prüft Manifest, Icon-Größen und dass
 jede vorgehaltene Datei existiert.
 
-**Eine Party zur Zeit.** Ein Spotify-Konto hat genau einen Player, also steuert ihn genau eine Party: die zuletzt gestartete. Eine neue Party beendet deshalb die laufende, und eine alte lässt sich nicht wieder öffnen, solange eine andere läuft. Andere aktive Partys desselben Hosts gehen auf `standby` und fassen Spotify nicht an – liefen zwei gleichzeitig, verbuchten beide den laufenden Titel als ihren eigenen und legten beide Wünsche in dieselbe Warteschlange.
-
-**Reste in Spotifys Warteschlange.** Die Warteschlange gehört dem Spotify-Konto, nicht der
-Party, und die Web-API kann einen Titel nicht wieder herausnehmen. Ein Wunsch, der kurz vor
-dem Ende seiner Party übergeben wurde, läuft deshalb mitten in der nächsten an. Die
-Partybüchse erkennt das – sie weiß, welchen Titel sie für welche Party übergeben hat – und
-überspringt ihn, sobald er anfängt: einen pro Abgleich und nur genau den, der gerade läuft.
-Die eigene Musik des Hosts bleibt unangetastet.
+**Eine Party zur Zeit.** Ein Spotify-Konto hat genau einen Player, also steuert ihn genau eine Party: die zuletzt gestartete. Eine neue Party beendet deshalb die laufende, und eine alte lässt sich nicht wieder öffnen, solange eine andere läuft. Sollte doch eine zweite aktiv sein (Datenbestand von vor dieser Regel), geht sie auf `standby` und fasst Spotify nicht an.
 
 **Partys löschen.** In der Host-Ansicht einer Party, unten bei den Aktionen. Weg sind dann
-Wunschliste, Stimmen und Gäste. Lag beim Löschen noch ein Wunsch in Spotifys Warteschlange,
-sagt die Partybüchse das: danach weiß sie nicht mehr, dass der Titel von dort stammt, und
-überspringt ihn in der nächsten Party auch nicht mehr.
+Wunschliste, Stimmen und Gäste.
 
-Ohne Hintergrundprozess: Jede offene Seite (Gast, Display, Host) stößt alle paar Sekunden den Abgleich mit Spotify an. Läuft keine Seite, kann optional `php bin/console app:party:sync --watch` übernehmen.
+**Der Hintergrunddienst gehört dazu.** Jede *sichtbare* offene Seite (Gast, Display, Host)
+stößt den Abgleich mit Spotify an, im Hintergrund-Tab nur noch alle 15 Sekunden – und Browser
+bremsen Zeitgeber dort zusätzlich. Die Büchse startet den nächsten Wunsch aber wenige Sekunden
+vor dem Ende des laufenden Titels; wird dieses Fenster verpasst, springt Spotify selbst weiter
+und spielt etwas anderes. Deshalb im Partybetrieb mitlaufen lassen:
+
+```bash
+php bin/console app:party:sync --watch
+```
+
+Wo kein Dauerprozess möglich ist (Plesk, Shared Hosting), reicht ein Cron-Eintrag jede Minute;
+`--max-runtime` hält jeden Lauf kürzer als den Abstand zweier Starts:
+
+```bash
+* * * * * cd /pfad/zur/app && php bin/console app:party:sync --watch --max-runtime=55
+```
+
+Mehrere Läufe gleichzeitig sind unschädlich: `PlaybackSync` sperrt pro Party und lässt pro
+`MIN_INTERVAL_SECONDS` nur einen Durchgang zu, ganz gleich, ob er aus dem Dienst oder aus einem
+Browser kommt.
 
 ## 6. Wie der Abgleich funktioniert
 
-`App\Service\PlaybackSync` läuft höchstens alle 4 Sekunden pro Party:
+`App\Service\PlaybackSync` läuft höchstens alle 2 Sekunden pro Party (`MIN_INTERVAL_SECONDS`):
 
 1. Playback-Status vom Host-Konto lesen und als „Läuft gerade“ speichern.
-2. Wünsche, die an Spotify übergeben wurden, abschließen: läuft der Titel → `played` (Stimmen frei); ist er aus der Warteschlange verschwunden → ebenfalls als erledigt markieren (verhindert Endlosschleifen, wenn der Host skippt).
-3. Wartet noch keiner unserer Wünsche in Spotify: den Top-Wunsch **≤ 20 s vor Ende** des laufenden Titels in die Warteschlange legen. Ist der Player untätig, sofort starten.
-4. Keine Wünsche und Player untätig: Fallback-Playlist starten (falls konfiguriert).
+2. Abschließen: Läuft der Titel, den die Büchse gestartet hat, nicht mehr → `played` (Stimmen
+   werden frei). Hat der Host einen Wunsch in Spotify selbst gestartet, gilt er ab jetzt als der
+   laufende (`playing`).
+3. Ist der Player untätig oder sind vom laufenden Titel **≤ 3 s** übrig (`TAKEOVER_MS`): den
+   bestbewerteten Wunsch mit `PUT /me/player/play` **selbst starten**.
+4. Keine Wünsche offen: Fallback-Playlist starten (falls konfiguriert) – wenn der Player untätig
+   ist oder gerade der letzte Wunsch ausläuft. Ohne Playlist entscheidet dann Spotify (Autoplay),
+   was weiterspielt.
 
-Ein pausierter Player wird nicht angefasst.
+Ein pausierter Player wird nicht angefasst, und solange nichts gewünscht ist, läuft die Musik
+des Hosts unangetastet weiter.
+
+### Warum nichts mehr eingereiht wird
+
+Bis 11/2026 legte die Büchse den Top-Wunsch in Spotifys Warteschlange. Das kann nicht
+zuverlässig funktionieren:
+
+- Die Warteschlange gehört dem **Spotify-Konto**, nicht der Party. Die Web-API kann nur
+  hineinlegen – nie herausnehmen, nie umsortieren.
+- Alles andere, was dort liegt, läuft dazwischen: vom Host selbst eingereihte Titel, Autoplay,
+  Reste einer früheren Party. Die Büchse konnte das nur hinterher erkennen und überspringen.
+- Wer „als Nächstes“ läuft, entschied sich schon beim Einreihen, also bis zu ein Lied früher.
+  Stimmen, die danach kamen, zählten für diesen Wechsel nicht mehr.
+
+Genau das waren die falschen Lieder – nicht Spotify, nicht die Verbindung, nicht die Datenbank.
+Jetzt entscheidet die Rangliste im Moment des Wechsels, und es kann nichts mehr in der
+Warteschlange liegenbleiben, das in der nächsten Party anläuft.
+
+Der Preis sind die letzten rund drei Sekunden eines Titels: Die Büchse muss den nächsten Wunsch
+kurz vor dem Ende starten, weil Spotify sonst von selbst weiterspringt. `TAKEOVER_MS` in
+`PlaybackSync` ist die Stellschraube; sie muss über dem Abstand zweier Durchgänge liegen.
+
+### Warum SQLite reicht
+
+Die Last einer Party sind ein paar Dutzend Zeilen und wenige Schreibvorgänge pro Sekunde – dafür
+braucht es keinen Datenbankserver. Was fehlte, waren zwei Einstellungen: `journal_mode = WAL`
+(Lesen und Schreiben behindern sich nicht mehr) und `busy_timeout = 5000` (ein zweiter Schreiber
+wartet, statt mit „database is locked“ abzubrechen, womöglich mitten im Abgleich). Beides setzt
+`App\Doctrine\SqlitePragmasMiddleware` bei jeder Verbindung.
 
 ## 7. Sicherheit
 
@@ -199,7 +243,8 @@ Die Test-Umgebung braucht keine eigene Env-Datei: Kernel-Klasse, Test-Datenbank 
 src/Controller      Home, Login, Spotify-Verbindung, Host, Gast, Display, QR, JSON-API
 src/Entity          Host, Party, Guest, Suggestion (+Status), Vote
 src/Security        HostUser, HostUserProvider, HostLoginAuthenticator, HostCredentials (aus Env)
-src/Service         VotingService, PlaybackSync, TrackLookup, GuestResolver, HostSession, …
+src/Service         VotingService, PlaybackSync (der DJ), TrackLookup, GuestResolver, HostSession, …
+src/Doctrine        SqlitePragmasMiddleware (WAL, busy_timeout)
 src/Spotify         SpotifyClient (Web API), SpotifyAuthenticator (OAuth), HostTokenProvider, DTOs
 templates/          Twig, Design angelehnt an achim-kraemer.com (Lexend, dunkel, Violett/Blau)
 public/css, public/js  Plain CSS und Vanilla JS, kein Build
@@ -210,7 +255,9 @@ docker/, Dockerfile, compose.yaml   Container für Test und Hosting
 ## 10. Bekannte Grenzen
 
 - Spotify kann die Web API jederzeit weiter einschränken (zuletzt 11/2024, 05/2025, 02/2026). Der Development Mode ist für private Nutzung gedacht; für einen Dauerbetrieb in einer Bar wäre Extended Quota nötig, das Spotify nur Unternehmen mit 250.000 MAU gewährt.
-- Die Warteschlange ist Spotify-seitig: Hat der Host selbst Titel eingereiht, kommen die zuerst.
+- Der Wechsel zwischen zwei Titeln ist ein harter Schnitt: Die letzten rund drei Sekunden des laufenden Titels fallen weg. Lückenlos ginge nur über Spotifys Warteschlange – und damit wäre die Kontrolle über die Reihenfolge wieder weg.
+- Hat der Host in Spotify selbst Titel eingereiht, laufen die nach dem aktuellen Wunsch an; die Büchse übernimmt dann am Ende dieses Titels wieder. Herausnehmen kann die Web-API sie nicht.
+- Läuft die Wunschliste leer und ist keine Fallback-Playlist eingetragen, spielt Spotify von sich aus weiter (Autoplay). Der nächste Wunsch übernimmt am Ende des laufenden Titels.
 - Episoden/Podcasts werden angezeigt, aber nicht als Wunsch angeboten.
 - Es gibt genau ein Host-Konto (aus der Umgebung). Mehrere Hosts bräuchten eine Benutzertabelle.
 
@@ -319,6 +366,19 @@ Dokumentwurzel. Sie überlebt den Deploy, weil der Hook kein `git clean` läuft 
    `INVALID_CLIENT: Invalid redirect URI` ab.
 
 4. `git push main main` – jetzt läuft das Deployment durch.
+
+5. **Hintergrunddienst einrichten.** In Plesk unter **Websites & Domains →
+   Geplante Aufgaben** einen Eintrag „jede Minute“ anlegen:
+
+   ```bash
+   cd /var/www/vhosts/achim-kraemer.com/partybuechse.achim-kraemer.com && /opt/plesk/php/8.5/bin/php bin/console app:party:sync --watch --max-runtime=55
+   ```
+
+   Ohne ihn hängt der Abgleich an sichtbaren Browser-Tabs. Die Büchse startet
+   jeden Titel selbst, wenige Sekunden vor dem Ende des laufenden; wird dieses
+   Fenster verpasst, spielt Spotify weiter, was es selbst für richtig hält.
+   Läuft keine Party, kostet der Dienst nichts weiter als eine Abfrage der
+   Datenbank pro Durchgang (keine Spotify-Aufrufe).
 
 ### Was tun, wenn im Betrieb etwas schiefgeht
 

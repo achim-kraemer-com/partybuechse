@@ -13,7 +13,7 @@
  * VERSION hochzählen, wenn sich eine der Dateien in SHELL ändert.
  */
 
-const VERSION = 'partybuechse-shell-v2';
+const VERSION = 'partybuechse-shell-v3';
 const OFFLINE_URL = '/offline.html';
 const SHELL = [
     OFFLINE_URL,

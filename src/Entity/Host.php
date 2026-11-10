@@ -46,7 +46,9 @@ class Host
 
     /** @var Collection<int, Party> */
     #[ORM\OneToMany(targetEntity: Party::class, mappedBy: 'host')]
-    #[ORM\OrderBy(['createdAt' => 'DESC'])]
+    // \SortDirection kommt aus PHP 8.6; bis dahin liefert symfony/polyfill-php86 das Enum,
+    // das doctrine/orm selbst voraussetzt. Die Schreibweise mit 'DESC' ist abgekündigt.
+    #[ORM\OrderBy(['createdAt' => \SortDirection::Descending])]
     private Collection $parties;
 
     public function __construct(

@@ -3,6 +3,11 @@ framework:
     secret: '%env(APP_SECRET)%'
     csrf_protection: true
 
+    # Ab Symfony 8 ist das die Vorgabe; ausdrücklich gesetzt, weil es sonst bei jedem
+    # Container-Bau eine Deprecation gibt. Die Anwendung nutzt PropertyInfo nicht selbst.
+    property_info:
+        with_constructor_extractor: true
+
     # Behind Docker/Caddy/nginx: honour X-Forwarded-* from the proxies listed in TRUSTED_PROXIES
     trusted_proxies: '%env(default::TRUSTED_PROXIES)%'
     trusted_headers: ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'x-forwarded-prefix']

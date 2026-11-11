@@ -48,7 +48,7 @@ interface SpotifyApiInterface
     public function skipToNext(Host $host, ?string $deviceId = null): void;
 
     /**
-     * @return array<int, array{id: string, name: string, type: string, is_active: bool}>
+     * @return array<int, array{id: string, name: string, type: string, is_active: bool, is_restricted: bool}>
      *
      * @throws SpotifyApiException
      */

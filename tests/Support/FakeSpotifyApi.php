@@ -21,6 +21,12 @@ final class FakeSpotifyApi implements SpotifyApiInterface
     /** Spotify lehnt den Start ab (z. B. weil das Gerät zwischenzeitlich weg ist). */
     public bool $failPlayback = false;
 
+    /** Ein Start lässt den Titel wirklich anlaufen (sonst quittiert Spotify nur). */
+    public bool $playbackStarts = false;
+
+    /** @var array<int, array{id: string, name: string, type: string, is_active: bool, is_restricted: bool}> */
+    public array $devices = [];
+
     /** @var array<int, array<int, mixed>> */
     public array $calls = [];
 
@@ -66,6 +72,17 @@ final class FakeSpotifyApi implements SpotifyApiInterface
         if ($this->failPlayback) {
             throw new SpotifyApiException('Player command failed: No active device found', 404, 'NO_ACTIVE_DEVICE');
         }
+
+        if ($this->playbackStarts && [] !== $uris && isset($this->tracks[$uris[0]])) {
+            $this->state = new PlaybackState(
+                $this->state?->deviceId ?? 'dev',
+                $this->state?->deviceName ?? 'Küche',
+                true,
+                0,
+                $this->tracks[$uris[0]],
+                $this->state?->fetchedAt ?? new \DateTimeImmutable(),
+            );
+        }
     }
 
     public function skipToNext(Host $host, ?string $deviceId = null): void
@@ -75,7 +92,7 @@ final class FakeSpotifyApi implements SpotifyApiInterface
 
     public function getDevices(Host $host): array
     {
-        return [];
+        return $this->devices;
     }
 
     /** @return string[] names of the calls made so far */

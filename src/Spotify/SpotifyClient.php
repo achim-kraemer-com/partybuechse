@@ -128,6 +128,8 @@ class SpotifyClient implements SpotifyApiInterface
                 'name' => (string) ($device['name'] ?? ''),
                 'type' => (string) ($device['type'] ?? ''),
                 'is_active' => (bool) ($device['is_active'] ?? false),
+                // Spotify nimmt für ein solches Gerät Befehle an und führt sie nicht aus.
+                'is_restricted' => (bool) ($device['is_restricted'] ?? false),
             ];
         }
 
@@ -177,7 +179,18 @@ class SpotifyClient implements SpotifyApiInterface
      */
     private function command(Host $host, string $method, string $path, array $options = []): void
     {
-        $this->send($host, $method, $path, $options);
+        $status = $this->send($host, $method, $path, $options)->getStatusCode();
+
+        // 204 heisst „ausgeführt“. Alles andere unter 400 heisst nur „angenommen“: 202 etwa steht
+        // für ein Gerät, das Spotify gerade nicht erreicht – der Befehl verfällt dann still.
+        // Ohne diese Zeile stand im Log, dass die Büchse gestartet hat, aber nie, was Spotify
+        // dazu gesagt hat.
+        if (204 !== $status) {
+            $this->logger->warning('Spotify accepted a player command without carrying it out', [
+                'path' => $path,
+                'status' => $status,
+            ]);
+        }
     }
 
     /**

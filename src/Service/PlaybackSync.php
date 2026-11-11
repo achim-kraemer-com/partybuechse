@@ -282,6 +282,9 @@ class PlaybackSync
             $this->logger->warning('The started wish never reached the player', [
                 'party' => $party->getCode(),
                 'wish' => $running->getSpotifyUri(),
+                'device' => $state->deviceName,
+                'isPlaying' => $state->isPlaying,
+                'playerShows' => $state->track?->uri,
             ]);
 
             return new Settlement(

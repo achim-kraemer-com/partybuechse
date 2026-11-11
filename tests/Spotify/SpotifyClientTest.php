@@ -94,10 +94,10 @@ final class SpotifyClientTest extends TestCase
 
         $client->startPlayback($this->host(), ['spotify:track:'.str_repeat('a', 22)]);
 
-        self::assertCount(1, $log->lines);
-        self::assertStringContainsString('without carrying it out', $log->lines[0]['message']);
-        self::assertSame(202, $log->lines[0]['context']['status']);
-        self::assertSame('/me/player/play', $log->lines[0]['context']['path']);
+        self::assertCount(1, $log->warnings());
+        self::assertStringContainsString('without carrying it out', $log->warnings()[0]['message']);
+        self::assertSame(202, $log->warnings()[0]['context']['status']);
+        self::assertSame('/me/player/play', $log->warnings()[0]['context']['path']);
     }
 
     public function testAnExecutedPlayerCommandIsNotWorthALogLine(): void
@@ -107,7 +107,7 @@ final class SpotifyClientTest extends TestCase
 
         $client->startPlayback($this->host(), ['spotify:track:'.str_repeat('a', 22)]);
 
-        self::assertSame([], $log->lines);
+        self::assertSame([], $log->warnings(), 'Ein ausgefuehrter Befehl ist keine Warnung wert.');
     }
 
     /** Der von Spotify vorgesehene Weg, ein Gerät zu übernehmen: PUT /me/player. */
@@ -153,8 +153,8 @@ final class SpotifyClientTest extends TestCase
 
         $client->addToQueue($this->host(), 'spotify:track:'.str_repeat('a', 22));
 
-        self::assertSame(200, $log->lines[0]['context']['status']);
-        self::assertSame('yIapJeGeBVsqLVs874nacau4cUU', $log->lines[0]['context']['body']);
+        self::assertSame(200, $log->warnings()[0]['context']['status']);
+        self::assertSame('yIapJeGeBVsqLVs874nacau4cUU', $log->warnings()[0]['context']['body']);
     }
 
     public function testTheQueueIsReadAsTracks(): void
@@ -187,12 +187,18 @@ final class SpotifyClientTest extends TestCase
     private function collectingLogger(): LoggerInterface
     {
         return new class extends AbstractLogger {
-            /** @var array<int, array{message: string, context: array<string, mixed>}> */
+            /** @var array<int, array{level: string, message: string, context: array<string, mixed>}> */
             public array $lines = [];
 
             public function log($level, \Stringable|string $message, array $context = []): void
             {
-                $this->lines[] = ['message' => (string) $message, 'context' => $context];
+                $this->lines[] = ['level' => (string) $level, 'message' => (string) $message, 'context' => $context];
+            }
+
+            /** @return array<int, array{level: string, message: string, context: array<string, mixed>}> */
+            public function warnings(): array
+            {
+                return array_values(array_filter($this->lines, static fn (array $l): bool => 'warning' === $l['level']));
             }
         };
     }

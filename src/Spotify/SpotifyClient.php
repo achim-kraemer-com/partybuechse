@@ -210,6 +210,15 @@ class SpotifyClient implements SpotifyApiInterface
      */
     private function command(Host $host, string $method, string $path, array $options = []): void
     {
+        // Was genau hinausgeht. Player-Befehle sind selten, und als „play“ quittiert wurde und
+        // nichts lief, war die erste Frage, ob ueberhaupt das Richtige auf dem Draht steht.
+        $this->logger->info('Spotify player command', [
+            'method' => $method,
+            'path' => $path,
+            'query' => $options['query'] ?? null,
+            'json' => $options['json'] ?? null,
+        ]);
+
         $response = $this->send($host, $method, $path, $options);
         $status = $response->getStatusCode();
 

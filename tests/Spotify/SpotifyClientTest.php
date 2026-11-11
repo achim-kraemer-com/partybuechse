@@ -128,6 +128,49 @@ final class SpotifyClientTest extends TestCase
         self::assertSame(['device_ids' => ['device-1'], 'play' => true], json_decode((string) $seen['body'], true));
     }
 
+    public function testQueueingSendsTheUriAsAQueryParameter(): void
+    {
+        $seen = '';
+        $httpClient = new MockHttpClient(function (string $method, string $url) use (&$seen): MockResponse {
+            $seen = $method.' '.$url;
+
+            return new MockResponse('', ['http_code' => 204]);
+        });
+        $client = new SpotifyClient($httpClient, $this->tokenProvider($httpClient), $this->clock, new NullLogger());
+
+        $client->addToQueue($this->host(), 'spotify:track:'.str_repeat('a', 22), 'device-1');
+
+        self::assertStringContainsString('POST '.SpotifyClient::API_BASE.'/me/player/queue', $seen);
+        self::assertStringContainsString('uri=spotify:track:'.str_repeat('a', 22), $seen);
+        self::assertStringContainsString('device_id=device-1', $seen);
+    }
+
+    /** Der Fall vom 11.11.: 200 statt 204, und in der Warteschlange landet nichts. */
+    public function testAQueueCommandWithTheWrongStatusIsLoggedWithWhatCameBack(): void
+    {
+        $log = $this->collectingLogger();
+        $client = $this->clientWith($log, new MockResponse('yIapJeGeBVsqLVs874nacau4cUU', ['http_code' => 200]));
+
+        $client->addToQueue($this->host(), 'spotify:track:'.str_repeat('a', 22));
+
+        self::assertSame(200, $log->lines[0]['context']['status']);
+        self::assertSame('yIapJeGeBVsqLVs874nacau4cUU', $log->lines[0]['context']['body']);
+    }
+
+    public function testTheQueueIsReadAsTracks(): void
+    {
+        $client = $this->clientFor(new MockResponse(
+            '{"currently_playing":null,"queue":[{"uri":"spotify:track:'.str_repeat('b', 22).'","name":"Zweiter","artists":[{"name":"Band"}],"duration_ms":1000}]}',
+            ['http_code' => 200],
+        ));
+
+        $queue = $client->getQueue($this->host());
+
+        self::assertCount(1, $queue);
+        self::assertSame('Zweiter', $queue[0]->title);
+        self::assertSame('Band', $queue[0]->artists);
+    }
+
     private function clientFor(MockResponse ...$responses): SpotifyClient
     {
         return $this->clientWith(new NullLogger(), ...$responses);

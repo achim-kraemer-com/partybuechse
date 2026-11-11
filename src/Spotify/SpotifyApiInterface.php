@@ -59,6 +59,24 @@ interface SpotifyApiInterface
     public function transferPlayback(Host $host, string $deviceId, bool $play = true): void;
 
     /**
+     * Reiht einen Titel in die Warteschlange des Kontos ein (POST /me/player/queue).
+     *
+     * Die Mechanik vor dem DJ-Modus. Sie bleibt hier, weil sie die eine Gegenprobe ist, wenn
+     * Spotify ein „play“ quittiert und nichts spielt: Kommt der Titel in der Warteschlange an,
+     * nimmt der Player sehr wohl Befehle entgegen.
+     *
+     * @throws SpotifyApiException
+     */
+    public function addToQueue(Host $host, string $uri, ?string $deviceId = null): void;
+
+    /**
+     * @return array<int, TrackInfo> Was Spotify als Nächstes spielen würde
+     *
+     * @throws SpotifyApiException
+     */
+    public function getQueue(Host $host): array;
+
+    /**
      * @return array<int, array{id: string, name: string, type: string, is_active: bool, is_restricted: bool}>
      *
      * @throws SpotifyApiException

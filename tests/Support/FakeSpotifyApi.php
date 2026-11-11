@@ -33,6 +33,9 @@ final class FakeSpotifyApi implements SpotifyApiInterface
     /** @var array<string, TrackInfo> keyed by URI */
     public array $tracks = [];
 
+    /** @var array<int, TrackInfo> */
+    public array $queue = [];
+
     public function searchTracks(Host $host, string $query, int $limit = 10): array
     {
         $this->calls[] = ['search', $query];
@@ -93,6 +96,19 @@ final class FakeSpotifyApi implements SpotifyApiInterface
     public function transferPlayback(Host $host, string $deviceId, bool $play = true): void
     {
         $this->calls[] = ['transfer', $deviceId, $play];
+    }
+
+    public function addToQueue(Host $host, string $uri, ?string $deviceId = null): void
+    {
+        $this->calls[] = ['queue', $uri];
+        if (isset($this->tracks[$uri])) {
+            $this->queue[] = $this->tracks[$uri];
+        }
+    }
+
+    public function getQueue(Host $host): array
+    {
+        return $this->queue;
     }
 
     public function getDevices(Host $host): array

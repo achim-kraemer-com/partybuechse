@@ -125,6 +125,30 @@ class SpotifyClient implements SpotifyApiInterface
         ]);
     }
 
+    public function addToQueue(Host $host, string $uri, ?string $deviceId = null): void
+    {
+        $query = ['uri' => $uri];
+        if (null !== $deviceId) {
+            $query['device_id'] = $deviceId;
+        }
+
+        $this->command($host, 'POST', '/me/player/queue', ['query' => $query]);
+    }
+
+    public function getQueue(Host $host): array
+    {
+        $data = $this->call($host, 'GET', '/me/player/queue');
+
+        $queue = [];
+        foreach ($data['queue'] ?? [] as $item) {
+            if (\is_array($item) && !empty($item['uri'])) {
+                $queue[] = TrackInfo::fromApi($item);
+            }
+        }
+
+        return $queue;
+    }
+
     public function getDevices(Host $host): array
     {
         $data = $this->call($host, 'GET', '/me/player/devices');
@@ -186,7 +210,8 @@ class SpotifyClient implements SpotifyApiInterface
      */
     private function command(Host $host, string $method, string $path, array $options = []): void
     {
-        $status = $this->send($host, $method, $path, $options)->getStatusCode();
+        $response = $this->send($host, $method, $path, $options);
+        $status = $response->getStatusCode();
 
         // 204 heisst „ausgeführt“. Alles andere unter 400 heisst nur „angenommen“: 202 etwa steht
         // für ein Gerät, das Spotify gerade nicht erreicht – der Befehl verfällt dann still.
@@ -196,6 +221,9 @@ class SpotifyClient implements SpotifyApiInterface
             $this->logger->warning('Spotify accepted a player command without carrying it out', [
                 'path' => $path,
                 'status' => $status,
+                // Was dort steht, ist die einzige Spur: Ein Player-Befehl, der mit 200 und
+                // einem fremden Koerper antwortet, kommt nicht von der Player-API.
+                'body' => $this->excerpt($response->getContent(false)),
             ]);
         }
     }

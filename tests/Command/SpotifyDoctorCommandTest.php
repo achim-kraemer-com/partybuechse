@@ -116,6 +116,28 @@ final class SpotifyDoctorCommandTest extends KernelTestCase
         self::assertSame([], array_filter($this->spotify->calls, static fn (array $c): bool => 'transfer' === $c[0]));
     }
 
+    public function testTheQueueVariantReportsWhetherTheTrackArrived(): void
+    {
+        $tester = $this->tester();
+        $tester->execute(['--play' => null, '--queue' => true, '--wait' => '0']);
+
+        $tester->assertCommandIsSuccessful();
+        self::assertStringContainsString('steht in der Warteschlange', $tester->getDisplay());
+        self::assertContains(['queue', $this->wishUri], $this->spotify->calls);
+        self::assertSame([], array_filter($this->spotify->calls, static fn (array $c): bool => 'play' === $c[0]));
+    }
+
+    public function testTheQueueVariantSaysSoWhenNothingArrives(): void
+    {
+        $this->spotify->tracks = []; // Spotify quittiert, reiht aber nichts ein
+
+        $tester = $this->tester();
+        $exit = $tester->execute(['--play' => 'spotify:track:'.str_repeat('z', 22), '--queue' => true, '--wait' => '0']);
+
+        self::assertSame(1, $exit);
+        self::assertStringContainsString('verpufft', $tester->getDisplay());
+    }
+
     private function tester(): CommandTester
     {
         return new CommandTester(

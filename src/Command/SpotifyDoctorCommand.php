@@ -31,6 +31,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *     php bin/console app:spotify:doctor --play -v             # Top-Wunsch starten und nachsehen
  *     php bin/console app:spotify:doctor --play --no-device    # ohne device_id
  *     php bin/console app:spotify:doctor --play --transfer     # erst übergeben, dann starten
+ *     php bin/console app:spotify:doctor --play --queue        # einreihen statt starten
  *
  * Tokens stehen hier nie, nur ihre Laufzeit.
  */
@@ -67,6 +68,12 @@ class SpotifyDoctorCommand extends Command
             null,
             InputOption::VALUE_NONE,
             'Den Startbefehl ohne device_id schicken (dann gilt „das aktive Gerät“)',
+        );
+        $this->addOption(
+            'queue',
+            null,
+            InputOption::VALUE_NONE,
+            'Statt zu starten einreihen (POST /me/player/queue) und die Warteschlange auslesen',
         );
         $this->addOption(
             'transfer',
@@ -127,6 +134,11 @@ class SpotifyDoctorCommand extends Command
             $io->section('Startbefehl');
 
             $deviceId = $input->getOption('no-device') ? null : $before?->deviceId;
+
+            if ($input->getOption('queue')) {
+                return $this->queueInstead($io, $host, $uri, $deviceId, $wait);
+            }
+
             if ($input->getOption('transfer')) {
                 if (null === $before?->deviceId) {
                     $io->error('Ohne Gerät gibt es nichts zu übergeben.');
@@ -166,6 +178,45 @@ class SpotifyDoctorCommand extends Command
 
             return Command::FAILURE;
         }
+    }
+
+    /**
+     * Die Gegenprobe: Reiht den Titel ein, statt ihn zu starten.
+     *
+     * Kommt er in der Warteschlange an, nimmt der Player Befehle entgegen – dann liegt es
+     * ausschliesslich am „play“. Kommt er nicht an, verwirft Spotify jeden Schreibbefehl.
+     */
+    private function queueInstead(SymfonyStyle $io, Host $host, string $uri, ?string $deviceId, int $wait): int
+    {
+        $io->section('Einreihen');
+        $io->text(sprintf('POST /me/player/queue mit %s%s', $uri, null === $deviceId ? ' ohne device_id' : ''));
+        $this->spotify->addToQueue($host, $uri, $deviceId);
+        $io->text('Spotify hat den Befehl ohne Fehler angenommen.');
+
+        if ($wait > 0) {
+            sleep($wait);
+        }
+
+        $queue = $this->spotify->getQueue($host);
+        $io->section('Warteschlange');
+        if ([] === $queue) {
+            $io->text('(leer)');
+        }
+        foreach (\array_slice($queue, 0, 5) as $i => $track) {
+            $io->text(sprintf('%d. %s – %s', $i + 1, $track->title, $track->artists));
+        }
+
+        foreach ($queue as $track) {
+            if ($track->uri === $uri) {
+                $io->success('Der Titel steht in der Warteschlange. Schreibbefehle kommen an.');
+
+                return Command::SUCCESS;
+            }
+        }
+
+        $io->warning('Der Titel steht nicht in der Warteschlange. Auch das Einreihen verpufft.');
+
+        return Command::FAILURE;
     }
 
     private function showDevices(SymfonyStyle $io, Host $host): void

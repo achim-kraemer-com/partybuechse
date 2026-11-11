@@ -32,10 +32,10 @@ class SuggestionRepository extends ServiceEntityRepository
             ->andWhere('s.status IN (:statuses)')
             ->setParameter('party', $party)
             ->setParameter('statuses', [SuggestionStatus::Open->value, SuggestionStatus::Playing->value])
-            ->orderBy('s.status', 'DESC') // "playing" sorts before "open"
-            ->addOrderBy('s.voteCount', 'DESC')
-            ->addOrderBy('s.createdAt', 'ASC')
-            ->addOrderBy('s.id', 'ASC')
+            ->orderBy('s.status', \SortDirection::Descending) // "playing" sorts before "open"
+            ->addOrderBy('s.voteCount', \SortDirection::Descending)
+            ->addOrderBy('s.createdAt', \SortDirection::Ascending)
+            ->addOrderBy('s.id', \SortDirection::Ascending)
             ->getQuery()
             ->getResult();
     }
@@ -48,9 +48,9 @@ class SuggestionRepository extends ServiceEntityRepository
             ->andWhere('s.status = :status')
             ->setParameter('party', $party)
             ->setParameter('status', SuggestionStatus::Open->value)
-            ->orderBy('s.voteCount', 'DESC')
-            ->addOrderBy('s.createdAt', 'ASC')
-            ->addOrderBy('s.id', 'ASC')
+            ->orderBy('s.voteCount', \SortDirection::Descending)
+            ->addOrderBy('s.createdAt', \SortDirection::Ascending)
+            ->addOrderBy('s.id', \SortDirection::Ascending)
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();

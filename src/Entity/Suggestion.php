@@ -67,6 +67,16 @@ class Suggestion
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $playedAt = null;
 
+    /**
+     * Wann der Player diesen Titel zum ersten Mal wirklich gespielt hat.
+     *
+     * Spotify quittiert einen Startbefehl sofort, spielt ihn aber nicht in jedem Fall: ein
+     * schlafendes Gerät, ein Konto, das anderswo läuft. Erst dieser Vermerk unterscheidet
+     * einen Wunsch, der durch ist, von einem, der nie angelaufen ist.
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    private ?\DateTimeImmutable $confirmedAt = null;
+
     /** @var Collection<int, Vote> */
     #[ORM\OneToMany(targetEntity: Vote::class, mappedBy: 'suggestion')]
     private Collection $votes;
@@ -176,6 +186,15 @@ class Suggestion
     {
         $this->status = SuggestionStatus::Playing;
         $this->startedAt = $at;
+        $this->confirmedAt = null;
+
+        return $this;
+    }
+
+    /** Der Player hat den Titel gespielt – ab jetzt ist er nicht mehr bloß gestartet. */
+    public function confirm(\DateTimeImmutable $at): self
+    {
+        $this->confirmedAt ??= $at;
 
         return $this;
     }
@@ -185,6 +204,7 @@ class Suggestion
     {
         $this->status = SuggestionStatus::Open;
         $this->startedAt = null;
+        $this->confirmedAt = null;
 
         return $this;
     }
@@ -217,6 +237,11 @@ class Suggestion
     public function getPlayedAt(): ?\DateTimeImmutable
     {
         return $this->playedAt;
+    }
+
+    public function getConfirmedAt(): ?\DateTimeImmutable
+    {
+        return $this->confirmedAt;
     }
 
     /** @return Collection<int, Vote> */

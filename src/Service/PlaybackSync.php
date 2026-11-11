@@ -29,8 +29,10 @@ use Symfony\Component\Lock\LockFactory;
  *
  * Jetzt wird nichts mehr eingereiht. Ein Durchgang:
  *  1. Playback-Status lesen und als „Läuft gerade“ speichern.
- *  2. Abschließen: Läuft unser gestarteter Titel nicht mehr, gilt er als gelaufen. Hat der Host
- *     einen Wunsch von Hand gestartet, gilt er ab jetzt als der laufende.
+ *  2. Abschließen: Lief unser gestarteter Titel und läuft er nicht mehr, gilt er als gelaufen.
+ *     Ist er noch nicht angelaufen, bekommt er STARTUP_SECONDS Zeit – und wenn er sie nicht
+ *     nutzt, geht er zurück in die Rangliste, statt die Liste leerzuräumen. Hat der Host einen
+ *     Wunsch von Hand gestartet, gilt er ab jetzt als der laufende.
  *  3. Ist der Player untätig oder der laufende Titel fast zu Ende, den bestbewerteten Wunsch
  *     direkt starten (PUT /me/player/play). Die Rangliste entscheidet im Moment des Wechsels.
  *  4. Keine Wünsche offen und Player untätig: Fallback-Playlist starten (falls konfiguriert).
@@ -56,6 +58,17 @@ class PlaybackSync
     /** Polling clients and the worker trigger a sync at most this often. */
     public const MIN_INTERVAL_SECONDS = 2;
 
+    /**
+     * So lange darf ein gestarteter Wunsch brauchen, bis er im Player auftaucht.
+     *
+     * Spotify quittiert PUT /me/player/play sofort, GET /me/player meldet danach aber noch eine
+     * Weile den vorherigen Titel (oder gar keinen). Ohne dieses Fenster hielt der nächste
+     * Durchgang den gerade gestarteten Wunsch für durchgelaufen, hakte ihn ab und startete den
+     * nächsten – in wenigen Sekunden war die Liste leer und zu hören war nichts. Muss deutlich
+     * über dem Abstand zweier Durchgänge liegen.
+     */
+    public const STARTUP_SECONDS = 8;
+
     public function __construct(
         private readonly SpotifyApiInterface $spotify,
         private readonly SuggestionRepository $suggestions,
@@ -76,13 +89,29 @@ class PlaybackSync
             return null;
         }
 
-        $now = $this->clock->now();
-        $last = $party->getLastSyncAt();
-        if (null !== $last && ($now->getTimestamp() - $last->getTimestamp()) < self::MIN_INTERVAL_SECONDS) {
+        if ($this->ranJustNow($party)) {
             return null;
         }
 
-        return $this->locked($party, fn (): SyncResult => $this->run($party));
+        return $this->locked($party, function () use ($party): ?SyncResult {
+            // Noch einmal prüfen, diesmal im Lock: Host-Seite, Display, jedes Gast-Handy und der
+            // Hintergrunddienst pollen unabhängig voneinander, mehrere passieren die Prüfung oben
+            // gleichzeitig und stehen dann hintereinander hier an. Ohne diese zweite Prüfung lief
+            // jeder von ihnen einen eigenen Durchgang – Sekundenbruchteile hintereinander, mit
+            // einem Spotify-Zustand von vor dem Start.
+            $this->entityManager->refresh($party);
+
+            return $this->ranJustNow($party) ? null : $this->run($party);
+        });
+    }
+
+    /** Liegt der letzte Durchgang dieser Party noch keine MIN_INTERVAL_SECONDS zurück? */
+    private function ranJustNow(Party $party): bool
+    {
+        $last = $party->getLastSyncAt();
+
+        return null !== $last
+            && ($this->clock->now()->getTimestamp() - $last->getTimestamp()) < self::MIN_INTERVAL_SECONDS;
     }
 
     /** Ein Durchgang, auch wenn gerade erst einer war. */
@@ -137,9 +166,23 @@ class PlaybackSync
         $actions = [];
 
         try {
-            $actions = $this->settle($party, $state, $now);
+            $settlement = $this->settle($party, $state, $now);
+            $actions = $settlement->actions;
             $this->snapshot($party, $state);
-            $actions = array_merge($actions, $this->play($party, $state, $now));
+
+            if (null !== $settlement->problem) {
+                // Der Startbefehl ist nicht angekommen. Jetzt den nächsten Wunsch zu starten
+                // hieße, ihn genauso zu verheizen; der Host muss das Gerät wecken.
+                $party->setSync(Party::SYNC_ERROR, $settlement->problem, $now);
+                $this->entityManager->flush();
+                $this->logger->info('Party sync', ['party' => $party->getCode(), 'actions' => $actions]);
+
+                return new SyncResult(Party::SYNC_ERROR, $settlement->problem, $actions);
+            }
+
+            if (!$settlement->hold) {
+                $actions = array_merge($actions, $this->play($party, $state, $now));
+            }
         } catch (SpotifyApiException $e) {
             $this->entityManager->flush();
 
@@ -207,17 +250,48 @@ class PlaybackSync
     /**
      * Bringt die Wunschliste mit dem Player in Übereinstimmung.
      *
-     * @return string[]
+     * Ein gestarteter Wunsch ist erst dann durchgelaufen, wenn er auch einmal gelaufen IST.
+     * Spotify kennt kein „fertig“, nur das, was jetzt läuft – und meldet das verzögert.
      */
-    private function settle(Party $party, PlaybackState $state, \DateTimeImmutable $now): array
+    private function settle(Party $party, PlaybackState $state, \DateTimeImmutable $now): Settlement
     {
         $actions = [];
         $current = $state->track;
         $running = $this->suggestions->findPlaying($party);
 
-        // Unser Titel läuft nicht mehr: durch. (Spotify kennt kein „fertig“, nur das, was
-        // jetzt läuft – deshalb entscheidet immer der Player und nie eine Uhr.)
-        if (null !== $running && (null === $current || $running->getSpotifyUri() !== $current->uri)) {
+        // Unser Titel läuft: angekommen. Dieser Vermerk unterscheidet später „ist durch“ von
+        // „ist nie angelaufen“.
+        if (null !== $running && null !== $current && $running->getSpotifyUri() === $current->uri) {
+            $running->confirm($now);
+            $this->entityManager->flush();
+
+            return new Settlement();
+        }
+
+        if (null !== $running && null === $running->getConfirmedAt()) {
+            // Gestartet, aber noch nie im Player gesehen.
+            if ($this->isStarting($running, $now)) {
+                return new Settlement(hold: true);
+            }
+
+            // Spotify hat den Start quittiert und trotzdem nichts gespielt: zurück in die
+            // Rangliste. Ihn jetzt abzuhaken würde die Liste leerräumen, ohne dass ein einziger
+            // Wunsch zu hören war.
+            $running->reopen();
+            $this->entityManager->flush();
+            $this->logger->warning('The started wish never reached the player', [
+                'party' => $party->getCode(),
+                'wish' => $running->getSpotifyUri(),
+            ]);
+
+            return new Settlement(
+                [sprintf('Start nicht angekommen: %s', $this->label($running))],
+                problem: 'Spotify hat den Titel nicht gestartet. Spiele in Spotify kurz etwas an, dann übernimmt die Partybüchse.',
+            );
+        }
+
+        // Unser Titel lief und läuft jetzt nicht mehr: durch.
+        if (null !== $running) {
             $running->markPlayed($now);
             $actions[] = sprintf('Gelaufen: %s', $this->label($running));
             $running = null;
@@ -228,13 +302,23 @@ class PlaybackSync
             $wish = $this->suggestions->findPendingByUri($party, $current->uri);
             if (null !== $wish && $wish->isOpen()) {
                 $wish->markPlaying($now);
+                $wish->confirm($now);
                 $actions[] = sprintf('Läuft: %s', $this->label($wish));
             }
         }
 
         $this->entityManager->flush();
 
-        return $actions;
+        return new Settlement($actions);
+    }
+
+    /** Läuft für diesen Wunsch noch das Anlauffenster? */
+    private function isStarting(Suggestion $wish, \DateTimeImmutable $now): bool
+    {
+        $startedAt = $wish->getStartedAt();
+
+        return null !== $startedAt
+            && ($now->getTimestamp() - $startedAt->getTimestamp()) < self::STARTUP_SECONDS;
     }
 
     /** Speichert, was gerade läuft – samt dem Gast, der es sich gewünscht hat. */
@@ -360,6 +444,8 @@ class PlaybackSync
      *
      * Zwei gleichzeitige Durchgänge – etwa der Hintergrunddienst und ein Seitenaufruf – würden
      * beide denselben Wunsch starten und damit den Titel mitten im Lied neu beginnen.
+     *
+     * @param callable(): ?SyncResult $call
      */
     private function locked(Party $party, callable $call): ?SyncResult
     {

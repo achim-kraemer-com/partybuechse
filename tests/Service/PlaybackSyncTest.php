@@ -333,6 +333,84 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertContains(['next'], $this->spotify->calls);
     }
 
+    /**
+     * Der Fehler vom 11.11.2026: In vier Sekunden war die Wunschliste leer und zu hören war
+     * nichts. Spotify quittiert den Start sofort, meldet über GET /me/player aber noch den
+     * vorherigen Titel – der nächste Durchgang hielt den Wunsch deshalb für durchgelaufen,
+     * hakte ihn ab und startete den nächsten, und so weiter bis zum Ende der Liste.
+     */
+    public function testAStartedWishIsLeftAloneUntilThePlayerShowsIt(): void
+    {
+        $this->spotify->state = new PlaybackState('dev', 'Küche', false, 0, null, $this->clock->now());
+        $this->sync->sync($this->party);
+        self::assertSame(SuggestionStatus::Playing, $this->top->getStatus());
+
+        // Spotify meldet weiter nichts: Anlauffenster, also abwarten.
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        $result = $this->sync->sync($this->party);
+
+        self::assertSame(Party::SYNC_OK, $result->status);
+        self::assertSame([], $result->actions, 'Nichts abhaken, solange der Start noch unterwegs ist.');
+        self::assertSame(SuggestionStatus::Playing, $this->top->getStatus());
+        self::assertSame(SuggestionStatus::Open, $this->second->getStatus(), 'Der nächste Wunsch bleibt liegen.');
+        self::assertSame(1, \count(array_filter($this->spotify->callNames(), static fn (string $n): bool => 'play' === $n)));
+
+        // Jetzt läuft er wirklich, und danach ist er auch wirklich durch.
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 2_000, isPlaying: true);
+        $this->sync->sync($this->party);
+        self::assertSame(SuggestionStatus::Playing, $this->top->getStatus());
+        self::assertNotNull($this->top->getConfirmedAt());
+
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 1_000, isPlaying: true);
+        $result = $this->sync->sync($this->party);
+
+        self::assertSame(SuggestionStatus::Played, $this->top->getStatus());
+        self::assertStringContainsString('Gelaufen', (string) $result->message);
+    }
+
+    /**
+     * Spotify quittiert den Start, spielt aber nichts (schlafendes Gerät). Dann gehört der Wunsch
+     * zurück in die Rangliste – und nicht die ganze Liste durchgereicht.
+     */
+    public function testAStartThatNeverArrivesDoesNotDrainTheList(): void
+    {
+        $this->spotify->state = new PlaybackState('dev', 'Küche', false, 0, null, $this->clock->now());
+        $this->sync->sync($this->party);
+        self::assertSame(SuggestionStatus::Playing, $this->top->getStatus());
+
+        $this->clock->sleep(PlaybackSync::STARTUP_SECONDS);
+        $result = $this->sync->sync($this->party);
+
+        self::assertSame(Party::SYNC_ERROR, $result->status);
+        self::assertStringContainsString('nicht gestartet', (string) $result->message);
+        self::assertSame(SuggestionStatus::Open, $this->top->getStatus(), 'Zurück in die Rangliste.');
+        self::assertNull($this->top->getStartedAt());
+        self::assertSame(SuggestionStatus::Open, $this->second->getStatus(), 'Der nächste Wunsch wird nicht verheizt.');
+        self::assertSame(1, \count(array_filter($this->spotify->callNames(), static fn (string $n): bool => 'play' === $n)));
+    }
+
+    /**
+     * Host-Seite, Display, jedes Gast-Handy und der Hintergrunddienst pollen unabhängig: Mehrere
+     * Anfragen passieren die Intervall-Prüfung gleichzeitig und stehen dann hintereinander am
+     * Lock. Die zweite Prüfung im Lock verhindert, dass sie alle einen Durchgang laufen.
+     */
+    public function testAPollThatWasOvertakenAtTheLockDoesNotRunASecondTime(): void
+    {
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 10_000, isPlaying: true);
+
+        // Ein anderer Poll war schneller: In der Datenbank steht der frische Zeitstempel, dieses
+        // Party-Objekt im Speicher kennt ihn noch nicht.
+        $this->em->getConnection()->executeStatement(
+            'UPDATE party SET last_sync_at = ? WHERE id = ?',
+            [$this->clock->now()->format('Y-m-d H:i:s'), $this->party->getId()],
+        );
+
+        self::assertNull($this->sync->syncIfDue($this->party));
+        self::assertSame([], $this->spotify->calls, 'Kein zweiter Durchgang, also auch kein Spotify-Aufruf.');
+    }
+
     public function testSyncIfDueIsThrottled(): void
     {
         $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 10_000, isPlaying: true);

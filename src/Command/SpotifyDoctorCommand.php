@@ -27,8 +27,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * welches Gerät gemeint war und was es ist – ein Lautsprecher, der über Spotify Connect nur
  * zuhört ("is_restricted"), nimmt Befehle an und führt sie nie aus.
  *
- *     php bin/console app:spotify:doctor              # nur lesen: Geräte und Wiedergabestand
- *     php bin/console app:spotify:doctor --play -v    # dazu den Top-Wunsch starten und nachsehen
+ *     php bin/console app:spotify:doctor                       # nur lesen: Geräte, Wiedergabestand
+ *     php bin/console app:spotify:doctor --play -v             # Top-Wunsch starten und nachsehen
+ *     php bin/console app:spotify:doctor --play --no-device    # ohne device_id
+ *     php bin/console app:spotify:doctor --play --transfer     # erst übergeben, dann starten
  *
  * Tokens stehen hier nie, nur ihre Laufzeit.
  */
@@ -59,6 +61,18 @@ class SpotifyDoctorCommand extends Command
             InputOption::VALUE_OPTIONAL,
             'Einen Titel starten und nachsehen, ob er anläuft (ohne Wert: der Top-Wunsch der laufenden Party)',
             false,
+        );
+        $this->addOption(
+            'no-device',
+            null,
+            InputOption::VALUE_NONE,
+            'Den Startbefehl ohne device_id schicken (dann gilt „das aktive Gerät“)',
+        );
+        $this->addOption(
+            'transfer',
+            't',
+            InputOption::VALUE_NONE,
+            'Die Wiedergabe vor dem Start ausdrücklich an das Gerät übergeben (PUT /me/player)',
         );
         $this->addOption(
             'wait',
@@ -111,8 +125,25 @@ class SpotifyDoctorCommand extends Command
             $wait = max(0, (int) $input->getOption('wait'));
 
             $io->section('Startbefehl');
-            $io->text(sprintf('PUT /me/player/play mit %s auf Gerät %s', $uri, $before?->deviceName ?? '(keines)'));
-            $this->spotify->startPlayback($host, [$uri], null, $before?->deviceId);
+
+            $deviceId = $input->getOption('no-device') ? null : $before?->deviceId;
+            if ($input->getOption('transfer')) {
+                if (null === $before?->deviceId) {
+                    $io->error('Ohne Gerät gibt es nichts zu übergeben.');
+
+                    return Command::FAILURE;
+                }
+                $io->text(sprintf('PUT /me/player (Übergabe an %s, play: true)', $before->deviceName ?? '(unbekannt)'));
+                $this->spotify->transferPlayback($host, $before->deviceId);
+                $io->text('Übergabe ohne Fehler angenommen.');
+            }
+
+            $io->text(sprintf(
+                'PUT /me/player/play mit %s%s',
+                $uri,
+                null === $deviceId ? ' ohne device_id' : sprintf(' auf Gerät %s', $before?->deviceName ?? '(unbekannt)'),
+            ));
+            $this->spotify->startPlayback($host, [$uri], null, $deviceId);
             $io->text('Spotify hat den Befehl ohne Fehler angenommen.');
 
             if ($wait > 0) {
@@ -127,7 +158,7 @@ class SpotifyDoctorCommand extends Command
             }
 
             $io->warning('Der Titel läuft nicht. Spotify hat den Befehl angenommen und nicht ausgeführt – genau der Fall aus dem Log.');
-            $io->text('Prüfen: Spielt das Gerät oben gerade wirklich (Spotify Premium, Gerät aktiv, nicht "nur zuhörend")?');
+            $io->text('Varianten: --no-device (ohne device_id) und --transfer (erst übergeben, dann starten).');
 
             return Command::FAILURE;
         } catch (SpotifyApiException $e) {

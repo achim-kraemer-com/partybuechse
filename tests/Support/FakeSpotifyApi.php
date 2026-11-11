@@ -90,6 +90,11 @@ final class FakeSpotifyApi implements SpotifyApiInterface
         $this->calls[] = ['next'];
     }
 
+    public function transferPlayback(Host $host, string $deviceId, bool $play = true): void
+    {
+        $this->calls[] = ['transfer', $deviceId, $play];
+    }
+
     public function getDevices(Host $host): array
     {
         return $this->devices;

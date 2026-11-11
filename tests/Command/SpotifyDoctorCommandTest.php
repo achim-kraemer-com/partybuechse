@@ -89,6 +89,33 @@ final class SpotifyDoctorCommandTest extends KernelTestCase
         self::assertStringContainsString('Der Titel läuft', $tester->getDisplay());
     }
 
+    public function testWithTransferItHandsThePlayerOverFirst(): void
+    {
+        $this->spotify->playbackStarts = true;
+
+        $tester = $this->tester();
+        $tester->execute(['--play' => null, '--transfer' => true, '--wait' => '0']);
+
+        $tester->assertCommandIsSuccessful();
+        $names = array_column($this->spotify->calls, 0);
+        self::assertContains(['transfer', 'dev', true], $this->spotify->calls);
+        self::assertLessThan(
+            array_search('play', $names, true),
+            array_search('transfer', $names, true),
+            'Erst übergeben, dann starten.',
+        );
+        self::assertStringContainsString('Übergabe', $tester->getDisplay());
+    }
+
+    public function testWithoutDeviceItSendsNoDeviceId(): void
+    {
+        $tester = $this->tester();
+        $tester->execute(['--play' => null, '--no-device' => true, '--wait' => '0']);
+
+        self::assertStringContainsString('ohne device_id', $tester->getDisplay());
+        self::assertSame([], array_filter($this->spotify->calls, static fn (array $c): bool => 'transfer' === $c[0]));
+    }
+
     private function tester(): CommandTester
     {
         return new CommandTester(

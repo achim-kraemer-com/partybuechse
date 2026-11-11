@@ -48,6 +48,17 @@ interface SpotifyApiInterface
     public function skipToNext(Host $host, ?string $deviceId = null): void;
 
     /**
+     * Übergibt die Wiedergabe an ein Gerät (PUT /me/player).
+     *
+     * Der von Spotify vorgesehene Weg, ein Gerät zu übernehmen. Ein „play“ mit device_id tut das
+     * nebenbei mit, aber eben nicht immer: Auf dem Konto der Partybüchse brach dabei die
+     * laufende Wiedergabe ab, ohne dass der gewünschte Titel anlief.
+     *
+     * @throws SpotifyApiException
+     */
+    public function transferPlayback(Host $host, string $deviceId, bool $play = true): void;
+
+    /**
      * @return array<int, array{id: string, name: string, type: string, is_active: bool, is_restricted: bool}>
      *
      * @throws SpotifyApiException

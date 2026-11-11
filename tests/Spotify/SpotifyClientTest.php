@@ -110,6 +110,24 @@ final class SpotifyClientTest extends TestCase
         self::assertSame([], $log->lines);
     }
 
+    /** Der von Spotify vorgesehene Weg, ein Gerät zu übernehmen: PUT /me/player. */
+    public function testTransferSendsTheDeviceAndAsksForPlayback(): void
+    {
+        $seen = [];
+        $httpClient = new MockHttpClient(function (string $method, string $url, array $options) use (&$seen): MockResponse {
+            $seen = ['method' => $method, 'url' => $url, 'body' => $options['body'] ?? ''];
+
+            return new MockResponse('', ['http_code' => 204]);
+        });
+        $client = new SpotifyClient($httpClient, $this->tokenProvider($httpClient), $this->clock, new NullLogger());
+
+        $client->transferPlayback($this->host(), 'device-1');
+
+        self::assertSame('PUT', $seen['method']);
+        self::assertSame(SpotifyClient::API_BASE.'/me/player', $seen['url']);
+        self::assertSame(['device_ids' => ['device-1'], 'play' => true], json_decode((string) $seen['body'], true));
+    }
+
     private function clientFor(MockResponse ...$responses): SpotifyClient
     {
         return $this->clientWith(new NullLogger(), ...$responses);

@@ -118,6 +118,13 @@ class SpotifyClient implements SpotifyApiInterface
         $this->command($host, 'POST', '/me/player/next', $options);
     }
 
+    public function transferPlayback(Host $host, string $deviceId, bool $play = true): void
+    {
+        $this->command($host, 'PUT', '/me/player', [
+            'json' => ['device_ids' => [$deviceId], 'play' => $play],
+        ]);
+    }
+
     public function getDevices(Host $host): array
     {
         $data = $this->call($host, 'GET', '/me/player/devices');

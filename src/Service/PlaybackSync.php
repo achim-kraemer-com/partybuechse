@@ -82,6 +82,14 @@ class PlaybackSync
     public const TROUBLE_PAUSE_SECONDS = 300;
 
     /**
+     * So lange Ruhe, wenn Spotifys Kontingent für die App aufgebraucht ist.
+     *
+     * Eine solche Sperre dauert Stunden und kommt ohne Retry-After. Der Standardwert von einer
+     * Minute wäre hier 1 440 sinnlose Aufrufe am Tag.
+     */
+    public const QUOTA_PAUSE_SECONDS = 900;
+
+    /**
      * Abstand zweier Durchgänge, wenn es nichts zu tun gibt.
      *
      * Ohne offenen Wunsch und ohne laufenden Titel muss die Büchse Spotify nicht alle zwei
@@ -526,10 +534,8 @@ class PlaybackSync
 
         // Spotify sagt bei einer Drosselung selbst, wie lange es Ruhe haben will.
         if ($e->isRateLimited()) {
-            $party->quietenSpotify($now->modify(sprintf(
-                '+%d seconds',
-                $e->retryAfter ?? SpotifyApiException::DEFAULT_RETRY_AFTER,
-            )));
+            $pause = $e->retryAfter ?? ($e->isQuotaExceeded() ? self::QUOTA_PAUSE_SECONDS : SpotifyApiException::DEFAULT_RETRY_AFTER);
+            $party->quietenSpotify($now->modify(sprintf('+%d seconds', $pause)));
         }
         $party->setSync(Party::SYNC_ERROR, $e->userMessage(), $now);
         $this->entityManager->flush();

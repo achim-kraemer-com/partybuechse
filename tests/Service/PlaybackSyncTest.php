@@ -479,6 +479,23 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertNotNull($this->sync->syncIfDue($this->party), 'Danach wieder im Takt.');
     }
 
+    /**
+     * Das aufgebrauchte Kontingent kommt ohne Retry-After und dauert Stunden. Eine Minute
+     * Pause waeren 1 440 sinnlose Aufrufe am Tag.
+     */
+    public function testAnExhaustedQuotaBuysALongerSilenceThanAShortThrottle(): void
+    {
+        $this->spotify->failWith = new SpotifyApiException('Too many requests', 429, 'QUOTA_EXCEEDED');
+
+        $this->sync->sync($this->party);
+
+        self::assertEquals(
+            $this->clock->now()->modify(sprintf('+%d seconds', PlaybackSync::QUOTA_PAUSE_SECONDS)),
+            $this->party->getSpotifyQuietUntil(),
+        );
+        self::assertStringContainsString('Kontingent', (string) $this->party->getSyncMessage());
+    }
+
     /** Ohne offenen Wunsch und ohne laufenden Titel reicht ein Blick alle halbe Minute. */
     public function testAnIdlePartyAsksSpotifyFarLessOften(): void
     {

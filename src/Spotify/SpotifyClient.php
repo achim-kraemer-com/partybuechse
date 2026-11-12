@@ -294,8 +294,23 @@ class SpotifyClient implements SpotifyApiInterface
             // keep the generic message
         }
 
-        $this->logger->warning('Spotify API error', ['status' => $status, 'message' => $message, 'reason' => $reason]);
+        // Bei 429 sagt Spotify, wie lange es Ruhe haben will. Ohne diesen Wert lief die
+        // Partybüchse im Sekundentakt gegen die Sperre, bis das Kontingent ganz erschöpft war.
+        $retryAfter = null;
+        try {
+            $header = $response->getHeaders(false)['retry-after'][0] ?? null;
+            $retryAfter = null === $header ? null : max(1, (int) $header);
+        } catch (\Throwable) {
+            // ohne Kopfzeile bleibt es beim Standardwert
+        }
 
-        return new SpotifyApiException($message, $status, $reason);
+        $this->logger->warning('Spotify API error', [
+            'status' => $status,
+            'message' => $message,
+            'reason' => $reason,
+            'retryAfter' => $retryAfter,
+        ]);
+
+        return new SpotifyApiException($message, $status, $reason, null, $retryAfter);
     }
 }

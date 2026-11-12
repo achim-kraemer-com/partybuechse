@@ -12,6 +12,7 @@ use App\Repository\SuggestionRepository;
 use App\Service\PlaybackSync;
 use App\Service\VotingService;
 use App\Spotify\PlaybackState;
+use App\Spotify\SpotifyApiException;
 use App\Spotify\TrackInfo;
 use App\Tests\Support\FakeSpotifyApi;
 use App\Tests\Support\Fixtures;
@@ -409,6 +410,91 @@ final class PlaybackSyncTest extends KernelTestCase
 
         self::assertNull($this->sync->syncIfDue($this->party));
         self::assertSame([], $this->spotify->calls, 'Kein zweiter Durchgang, also auch kein Spotify-Aufruf.');
+    }
+
+    /**
+     * Die Nacht zum 12.11.2026: 18 402 × „Too many requests“ im Log, eine Zeile pro Sekunde.
+     * Ein Wunsch, den der Player nicht annahm, wurde alle zehn Sekunden neu gestartet, bis
+     * Spotify das Kontingent der App sperrte. Nach drei Versuchen ist deshalb Ruhe.
+     */
+    public function testAfterThreeRefusedStartsThePartyLeavesSpotifyAlone(): void
+    {
+        $this->spotify->state = new PlaybackState('dev', 'Küche', false, 0, null, $this->clock->now());
+
+        for ($attempt = 1; $attempt <= PlaybackSync::MAX_START_ATTEMPTS; ++$attempt) {
+            $this->sync->sync($this->party);                       // startet
+            $this->clock->sleep(PlaybackSync::STARTUP_SECONDS);
+            $result = $this->sync->sync($this->party);             // kommt nicht an
+            self::assertSame(Party::SYNC_ERROR, $result->status);
+        }
+
+        self::assertTrue($this->party->isSpotifyQuiet($this->clock->now()), 'Jetzt ist Ruhe.');
+        self::assertStringContainsString('wartet', (string) $this->party->getSyncMessage());
+
+        $before = \count($this->spotify->calls);
+        $this->clock->sleep(PlaybackSync::IDLE_INTERVAL_SECONDS);
+        self::assertNull($this->sync->syncIfDue($this->party), 'Kein Durchgang während der Pause.');
+        self::assertSame($before, \count($this->spotify->calls), 'Und kein einziger Aufruf bei Spotify.');
+
+        // Nach der Pause darf sie es wieder versuchen.
+        $this->clock->sleep(PlaybackSync::TROUBLE_PAUSE_SECONDS);
+        self::assertNotNull($this->sync->syncIfDue($this->party));
+    }
+
+    /** Läuft der Wunsch doch an, ist das Zählwerk wieder bei null. */
+    public function testAWishThatPlaysClearsTheTrouble(): void
+    {
+        $this->spotify->state = new PlaybackState('dev', 'Küche', false, 0, null, $this->clock->now());
+        $this->sync->sync($this->party);
+        $this->clock->sleep(PlaybackSync::STARTUP_SECONDS);
+        $this->sync->sync($this->party);
+        self::assertSame(1, $this->party->getFailedStarts());
+
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        $this->spotify->state = $this->playing($this->top->toTrackInfo(), progressMs: 1_000, isPlaying: true);
+        $this->sync->sync($this->party);
+
+        self::assertSame(0, $this->party->getFailedStarts());
+        self::assertFalse($this->party->isSpotifyQuiet($this->clock->now()));
+    }
+
+    /** Drosselt Spotify, hält sich die Büchse genau so lange zurück, wie Spotify verlangt. */
+    public function testARateLimitSilencesThePartyForAsLongAsSpotifyAsks(): void
+    {
+        $this->spotify->failWith = new SpotifyApiException('Too many requests', 429, 'QUOTA_EXCEEDED', null, 120);
+
+        $result = $this->sync->sync($this->party);
+
+        self::assertSame(Party::SYNC_ERROR, $result->status);
+        self::assertEquals(
+            $this->clock->now()->modify('+120 seconds'),
+            $this->party->getSpotifyQuietUntil(),
+        );
+
+        $this->spotify->failWith = null;
+        $this->clock->sleep(119);
+        self::assertNull($this->sync->syncIfDue($this->party), 'Noch Ruhe.');
+
+        $this->clock->sleep(2);
+        self::assertNotNull($this->sync->syncIfDue($this->party), 'Danach wieder im Takt.');
+    }
+
+    /** Ohne offenen Wunsch und ohne laufenden Titel reicht ein Blick alle halbe Minute. */
+    public function testAnIdlePartyAsksSpotifyFarLessOften(): void
+    {
+        foreach ($this->suggestions->findRanking($this->party) as $wish) {
+            $wish->markPlayed($this->clock->now());
+        }
+        $this->em->flush();
+        $this->spotify->state = new PlaybackState('dev', 'Küche', false, 0, null, $this->clock->now());
+
+        self::assertNotNull($this->sync->syncIfDue($this->party));
+
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        self::assertNull($this->sync->syncIfDue($this->party), 'Zwei Sekunden reichen hier nicht.');
+
+        $this->clock->sleep(PlaybackSync::IDLE_INTERVAL_SECONDS);
+        self::assertNotNull($this->sync->syncIfDue($this->party));
     }
 
     public function testSyncIfDueIsThrottled(): void

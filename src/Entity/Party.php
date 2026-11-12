@@ -77,6 +77,21 @@ class Party
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $lastSyncAt = null;
 
+    /**
+     * Bis dahin wird Spotify nicht angefasst.
+     *
+     * Spotify drosselt mit 429 und sagt im Retry-After, wie lange es Ruhe haben will. Ohne
+     * dieses Fenster lief die Büchse im Sekundentakt dagegen, bis das Kontingent der App ganz
+     * erschöpft war – 18 000 Fehlversuche in einer Nacht. Es bremst auch Wünsche, die der
+     * Player wiederholt nicht annimmt.
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    private ?\DateTimeImmutable $spotifyQuietUntil = null;
+
+    /** Wie oft hintereinander ein gestarteter Wunsch nicht am Player ankam. */
+    #[ORM\Column(options: ['default' => 0])]
+    private int $failedStarts = 0;
+
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
     private \DateTimeImmutable $createdAt;
 
@@ -216,6 +231,42 @@ class Party
     public function getLastSyncAt(): ?\DateTimeImmutable
     {
         return $this->lastSyncAt;
+    }
+
+    /** Lässt Spotify für diese Spanne in Ruhe. */
+    public function quietenSpotify(\DateTimeImmutable $until): self
+    {
+        $this->spotifyQuietUntil = $until;
+
+        return $this;
+    }
+
+    public function isSpotifyQuiet(\DateTimeImmutable $now): bool
+    {
+        return null !== $this->spotifyQuietUntil && $this->spotifyQuietUntil > $now;
+    }
+
+    public function getSpotifyQuietUntil(): ?\DateTimeImmutable
+    {
+        return $this->spotifyQuietUntil;
+    }
+
+    public function countFailedStart(): int
+    {
+        return ++$this->failedStarts;
+    }
+
+    public function getFailedStarts(): int
+    {
+        return $this->failedStarts;
+    }
+
+    public function clearPlaybackTrouble(): self
+    {
+        $this->failedStarts = 0;
+        $this->spotifyQuietUntil = null;
+
+        return $this;
     }
 
     public function getCreatedAt(): \DateTimeImmutable

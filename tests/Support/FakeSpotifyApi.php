@@ -59,9 +59,15 @@ final class FakeSpotifyApi implements SpotifyApiInterface
         return null;
     }
 
+    /** Spotify antwortet auf jeden Aufruf mit diesem Fehler (z. B. eine Drosselung). */
+    public ?SpotifyApiException $failWith = null;
+
     public function getPlaybackState(Host $host): ?PlaybackState
     {
         $this->calls[] = ['state'];
+        if (null !== $this->failWith) {
+            throw $this->failWith;
+        }
         if ($this->noActiveDevice) {
             throw new SpotifyApiException('Player command failed: No active device found', 404, 'NO_ACTIVE_DEVICE');
         }

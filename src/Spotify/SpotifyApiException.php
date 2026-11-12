@@ -6,11 +6,16 @@ namespace App\Spotify;
 
 class SpotifyApiException extends \RuntimeException
 {
+    /** Ohne Retry-After-Kopf: so lange wird Spotify in Ruhe gelassen. */
+    public const DEFAULT_RETRY_AFTER = 60;
+
     public function __construct(
         string $message,
         public readonly int $statusCode = 0,
         public readonly ?string $reason = null,
         ?\Throwable $previous = null,
+        /** Sekunden, die Spotify Ruhe haben will (Retry-After bei 429). */
+        public readonly ?int $retryAfter = null,
     ) {
         parent::__construct($message, $statusCode, $previous);
     }
@@ -36,7 +41,10 @@ class SpotifyApiException extends \RuntimeException
         return match (true) {
             $this->isPremiumRequired() => 'Spotify Premium ist für die Wiedergabesteuerung erforderlich.',
             $this->isNoActiveDevice() => 'Kein aktives Spotify-Gerät. Starte die Wiedergabe in Spotify, dann übernimmt die Partybüchse.',
-            $this->isRateLimited() => 'Spotify bremst gerade (Rate Limit). Nächster Versuch gleich.',
+            $this->isRateLimited() => sprintf(
+                'Spotify bremst gerade (Rate Limit). Nächster Versuch in %d Sekunden.',
+                $this->retryAfter ?? self::DEFAULT_RETRY_AFTER,
+            ),
             401 === $this->statusCode => 'Spotify-Anmeldung abgelaufen. Bitte als Host neu anmelden.',
             403 === $this->statusCode => sprintf(
                 'Spotify verweigert den Zugriff (403: %s). Ist dein Konto im Developer Dashboard freigeschaltet?',

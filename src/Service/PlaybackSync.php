@@ -69,6 +69,27 @@ class PlaybackSync
      */
     public const STARTUP_SECONDS = 8;
 
+    /**
+     * So oft darf ein Wunsch hintereinander nicht am Player ankommen, bevor Ruhe einkehrt.
+     *
+     * Ohne diese Grenze startete die Büchse denselben Wunsch alle zehn Sekunden neu, Nacht für
+     * Nacht – bis Spotify das Kontingent der App sperrte (429, QUOTA_EXCEEDED). Dreimal darf
+     * es eine Störung sein, danach ist es ein Zustand, den der Host beheben muss.
+     */
+    public const MAX_START_ATTEMPTS = 3;
+
+    /** So lange bleibt der Player danach unangetastet. */
+    public const TROUBLE_PAUSE_SECONDS = 300;
+
+    /**
+     * Abstand zweier Durchgänge, wenn es nichts zu tun gibt.
+     *
+     * Ohne offenen Wunsch und ohne laufenden Titel muss die Büchse Spotify nicht alle zwei
+     * Sekunden fragen; eine Party, die über Nacht offen bleibt, kostete so Zehntausende
+     * Aufrufe.
+     */
+    public const IDLE_INTERVAL_SECONDS = 30;
+
     public function __construct(
         private readonly SpotifyApiInterface $spotify,
         private readonly SuggestionRepository $suggestions,
@@ -89,7 +110,7 @@ class PlaybackSync
             return null;
         }
 
-        if ($this->ranJustNow($party)) {
+        if ($this->ranJustNow($party) || $party->isSpotifyQuiet($this->clock->now())) {
             return null;
         }
 
@@ -101,17 +122,31 @@ class PlaybackSync
             // einem Spotify-Zustand von vor dem Start.
             $this->entityManager->refresh($party);
 
-            return $this->ranJustNow($party) ? null : $this->run($party);
+            if ($this->ranJustNow($party) || $party->isSpotifyQuiet($this->clock->now())) {
+                return null;
+            }
+
+            return $this->run($party);
         });
     }
 
-    /** Liegt der letzte Durchgang dieser Party noch keine MIN_INTERVAL_SECONDS zurück? */
+    /** Liegt der letzte Durchgang dieser Party noch keinen vollen Abstand zurück? */
     private function ranJustNow(Party $party): bool
     {
         $last = $party->getLastSyncAt();
 
         return null !== $last
-            && ($this->clock->now()->getTimestamp() - $last->getTimestamp()) < self::MIN_INTERVAL_SECONDS;
+            && ($this->clock->now()->getTimestamp() - $last->getTimestamp()) < $this->interval($party);
+    }
+
+    /** Zwei Sekunden, solange etwas läuft oder etwas gewünscht ist – sonst in Ruhe. */
+    private function interval(Party $party): int
+    {
+        $nothingPlaying = null === ($party->getNowPlaying()['track'] ?? null);
+
+        return $nothingPlaying && null === $this->suggestions->findTopOpen($party)
+            ? self::IDLE_INTERVAL_SECONDS
+            : self::MIN_INTERVAL_SECONDS;
     }
 
     /** Ein Durchgang, auch wenn gerade erst einer war. */
@@ -216,6 +251,9 @@ class PlaybackSync
         }
 
         return $this->locked($party, function () use ($party, $now): SyncResult {
+            // Der Host greift selbst ein: Zählwerk und Zwangspause beginnen von vorn.
+            $party->clearPlaybackTrouble();
+
             try {
                 $state = $this->spotify->getPlaybackState($party->getHost());
             } catch (SpotifyApiException $e) {
@@ -263,6 +301,7 @@ class PlaybackSync
         // „ist nie angelaufen“.
         if (null !== $running && null !== $current && $running->getSpotifyUri() === $current->uri) {
             $running->confirm($now);
+            $party->clearPlaybackTrouble();
             $this->entityManager->flush();
 
             return new Settlement();
@@ -278,18 +317,32 @@ class PlaybackSync
             // Rangliste. Ihn jetzt abzuhaken würde die Liste leerräumen, ohne dass ein einziger
             // Wunsch zu hören war.
             $running->reopen();
-            $this->entityManager->flush();
+            $attempt = $party->countFailedStart();
             $this->logger->warning('The started wish never reached the player', [
                 'party' => $party->getCode(),
                 'wish' => $running->getSpotifyUri(),
                 'device' => $state->deviceName,
                 'isPlaying' => $state->isPlaying,
                 'playerShows' => $state->track?->uri,
+                'attempt' => $attempt,
             ]);
+
+            $problem = 'Spotify hat den Titel nicht gestartet. Spiele in Spotify kurz etwas an, dann übernimmt die Partybüchse.';
+            if ($attempt >= self::MAX_START_ATTEMPTS) {
+                // Dreimal dasselbe ist keine Störung mehr. Weiter im Zehn-Sekunden-Takt zu
+                // starten hiesse, das Spotify-Kontingent der App zu verbrennen.
+                $party->quietenSpotify($now->modify(sprintf('+%d seconds', self::TROUBLE_PAUSE_SECONDS)));
+                $problem = sprintf(
+                    'Spotify nimmt keinen Titel an (%d Versuche). Die Partybüchse wartet %d Minuten. Spiele in Spotify etwas an oder wähle ein anderes Gerät.',
+                    $attempt,
+                    (int) (self::TROUBLE_PAUSE_SECONDS / 60),
+                );
+            }
+            $this->entityManager->flush();
 
             return new Settlement(
                 [sprintf('Start nicht angekommen: %s', $this->label($running))],
-                problem: 'Spotify hat den Titel nicht gestartet. Spiele in Spotify kurz etwas an, dann übernimmt die Partybüchse.',
+                problem: $problem,
             );
         }
 
@@ -306,6 +359,8 @@ class PlaybackSync
             if (null !== $wish && $wish->isOpen()) {
                 $wish->markPlaying($now);
                 $wish->confirm($now);
+                // Der Player spielt einen Wunsch: Was vorher schiefging, ist damit Geschichte.
+                $party->clearPlaybackTrouble();
                 $actions[] = sprintf('Läuft: %s', $this->label($wish));
             }
         }
@@ -468,6 +523,14 @@ class PlaybackSync
     private function fail(Party $party, SpotifyApiException $e, \DateTimeImmutable $now, array $actions = []): SyncResult
     {
         $this->logger->warning('Party sync failed', ['party' => $party->getCode(), 'error' => $e->getMessage(), 'status' => $e->statusCode]);
+
+        // Spotify sagt bei einer Drosselung selbst, wie lange es Ruhe haben will.
+        if ($e->isRateLimited()) {
+            $party->quietenSpotify($now->modify(sprintf(
+                '+%d seconds',
+                $e->retryAfter ?? SpotifyApiException::DEFAULT_RETRY_AFTER,
+            )));
+        }
         $party->setSync(Party::SYNC_ERROR, $e->userMessage(), $now);
         $this->entityManager->flush();
 

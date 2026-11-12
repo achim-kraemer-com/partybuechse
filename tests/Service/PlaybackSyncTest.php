@@ -514,12 +514,50 @@ final class PlaybackSyncTest extends KernelTestCase
         self::assertNotNull($this->sync->syncIfDue($this->party));
     }
 
-    public function testSyncIfDueIsThrottled(): void
+    /**
+     * Der Abstand richtet sich nach der Restspielzeit: Mitten im Titel gibt es nichts zu
+     * entscheiden, kurz vor dem Ende schon. Vorher fragte die Büchse stur alle zwei Sekunden –
+     * rund 43 000 Aufrufe am Tag, für die meisten davon war die Antwort „läuft noch“.
+     */
+    public function testTheIntervalFollowsTheTimeLeftInTheTrack(): void
     {
+        // Noch gut drei Minuten: Es gilt der Deckel.
         $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 10_000, isPlaying: true);
-
         self::assertNotNull($this->sync->syncIfDue($this->party));
         self::assertNull($this->sync->syncIfDue($this->party));
+
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        self::assertNull($this->sync->syncIfDue($this->party), 'Mitten im Titel ist nach zwei Sekunden nichts zu tun.');
+
+        $this->clock->sleep(PlaybackSync::MAX_INTERVAL_SECONDS);
+        self::assertNotNull($this->sync->syncIfDue($this->party));
+
+        // Sechs Sekunden vor Schluss: wieder im Zwei-Sekunden-Takt, damit die Übernahme sitzt.
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 194_000, isPlaying: true);
+        $this->sync->sync($this->party);
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        self::assertNotNull($this->sync->syncIfDue($this->party));
+    }
+
+    /** Pausiert fasst die Büchse nichts an – dann genügt ein Blick alle zehn Sekunden. */
+    public function testAPausedPlayerIsCheckedAtTheSlowRate(): void
+    {
+        $this->spotify->state = $this->playing(Fixtures::track('h', 'Host Song'), progressMs: 60_000, isPlaying: false);
+        self::assertNotNull($this->sync->syncIfDue($this->party));
+
+        $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
+        self::assertNull($this->sync->syncIfDue($this->party));
+
+        $this->clock->sleep(PlaybackSync::MAX_INTERVAL_SECONDS);
+        self::assertNotNull($this->sync->syncIfDue($this->party));
+    }
+
+    /** Ein offener Wunsch bei stillem Player soll sofort anlaufen, nicht in zehn Sekunden. */
+    public function testAnOpenWishOnASilentPlayerKeepsTheFastRate(): void
+    {
+        $this->spotify->failPlayback = true; // sonst startet der erste Durchgang den Wunsch
+        $this->spotify->state = new PlaybackState('dev', 'Küche', false, 0, null, $this->clock->now());
+        $this->sync->sync($this->party);
 
         $this->clock->sleep(PlaybackSync::MIN_INTERVAL_SECONDS);
         self::assertNotNull($this->sync->syncIfDue($this->party));

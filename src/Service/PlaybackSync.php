@@ -98,6 +98,19 @@ class PlaybackSync
      */
     public const IDLE_INTERVAL_SECONDS = 30;
 
+    /**
+     * Grösster Abstand, solange ein Titel läuft.
+     *
+     * Wann er endet, steht im Schnappschuss – dafür muss niemand alle zwei Sekunden nachfragen.
+     * Dieser Deckel ist zugleich die Zeit, die ein Vorspulen oder ein Titelsprung in Spotify
+     * unbemerkt bleiben kann: lang genug, um die Last zu fünfteln, kurz genug, dass Spotifys
+     * Autoplay keinen fremden Titel unterbringt.
+     */
+    public const MAX_INTERVAL_SECONDS = 10;
+
+    /** Sicherheitsabstand, damit der Durchgang vor dem Übernahmefenster liegt und nicht darin. */
+    private const SAFETY_MS = 1_000;
+
     public function __construct(
         private readonly SpotifyApiInterface $spotify,
         private readonly SuggestionRepository $suggestions,
@@ -147,14 +160,64 @@ class PlaybackSync
             && ($this->clock->now()->getTimestamp() - $last->getTimestamp()) < $this->interval($party);
     }
 
-    /** Zwei Sekunden, solange etwas läuft oder etwas gewünscht ist – sonst in Ruhe. */
+    /**
+     * Der Abstand bis zum nächsten Durchgang, abgeleitet aus dem, was die Büchse schon weiss.
+     *
+     * Läuft ein Titel, steht sein Ende im Schnappschuss; bis kurz vor das Übernahmefenster gibt
+     * es nichts zu entscheiden. Also wird der Abstand aus der Restspielzeit berechnet und erst
+     * zum Schluss wieder eng – gedeckelt auf MAX_INTERVAL_SECONDS, denn ein Vorspulen in
+     * Spotify sieht die Büchse erst beim nächsten Durchgang.
+     */
     private function interval(Party $party): int
     {
-        $nothingPlaying = null === ($party->getNowPlaying()['track'] ?? null);
+        $nowPlaying = $party->getNowPlaying();
 
-        return $nothingPlaying && null === $this->suggestions->findTopOpen($party)
-            ? self::IDLE_INTERVAL_SECONDS
-            : self::MIN_INTERVAL_SECONDS;
+        if (\is_array($nowPlaying['track'] ?? null) && true !== ($nowPlaying['isPlaying'] ?? false)) {
+            // Pausiert: Die Büchse fasst den Player ohnehin nicht an, muss aber mitbekommen,
+            // wenn der Host weiterspielt.
+            return self::MAX_INTERVAL_SECONDS;
+        }
+
+        $remaining = $this->remainingMs($party);
+
+        if (null === $remaining) {
+            // Nichts läuft. Nur ein offener Wunsch rechtfertigt den engen Takt: Der soll
+            // sofort anlaufen, nicht in einer halben Minute.
+            return null === $this->suggestions->findTopOpen($party)
+                ? self::IDLE_INTERVAL_SECONDS
+                : self::MIN_INTERVAL_SECONDS;
+        }
+
+        $untilTakeover = (int) (($remaining - self::TAKEOVER_MS - self::SAFETY_MS) / 1_000);
+
+        return max(self::MIN_INTERVAL_SECONDS, min(self::MAX_INTERVAL_SECONDS, $untilTakeover));
+    }
+
+    /**
+     * Restspielzeit des zuletzt gesehenen Titels, hochgerechnet auf jetzt.
+     *
+     * Null, wenn nichts läuft oder pausiert ist – dann sagt die Restzeit nichts über den
+     * nächsten Wechsel.
+     */
+    private function remainingMs(Party $party): ?int
+    {
+        $nowPlaying = $party->getNowPlaying();
+        $track = $nowPlaying['track'] ?? null;
+
+        if (!\is_array($track) || true !== ($nowPlaying['isPlaying'] ?? false)) {
+            return null;
+        }
+
+        try {
+            $fetchedAt = new \DateTimeImmutable((string) ($nowPlaying['fetchedAt'] ?? 'now'));
+        } catch (\Exception) {
+            return null;
+        }
+
+        $elapsed = max(0, ($this->clock->now()->getTimestamp() - $fetchedAt->getTimestamp()) * 1_000);
+        $progress = (int) ($nowPlaying['progressMs'] ?? 0) + $elapsed;
+
+        return max(0, (int) ($track['durationMs'] ?? 0) - $progress);
     }
 
     /** Ein Durchgang, auch wenn gerade erst einer war. */
